@@ -88,7 +88,9 @@ const result = await build({
   format: 'esm',
   platform: 'browser',
   target: ['chrome120'],
-  splitting: false,
+  // Shared code (web3.js, the SDK, React) is one set of chunks for every page and the worker.
+  splitting: true,
+  chunkNames: 'chunks/[name]-[hash]',
   minify: process.argv.includes('--minify'),
   sourcemap: false,
   jsx: 'automatic',
@@ -134,7 +136,11 @@ if (release) {
   writeFileSync(join(dist, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 }
 // The extension pages do not need WebAssembly or WebSockets; the CSP allows neither.
-for (const f of ['popup.js', 'review.js', 'background.js', 'signer.js'])
+const scripts = [
+  ...['popup.js', 'review.js', 'background.js', 'signer.js'],
+  ...readdirSync(join(dist, 'chunks')).filter((f) => f.endsWith('.js')).map((f) => `chunks/${f}`),
+];
+for (const f of scripts)
   if (/\bWebAssembly\./.test(readFileSync(join(dist, f), 'utf8')))
     throw new Error(`${f} uses WebAssembly, which the extension CSP does not allow.`);
 const files = {};
