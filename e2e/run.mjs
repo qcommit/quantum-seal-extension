@@ -303,6 +303,21 @@ try {
   assert.ok(!JSON.stringify(backup).includes('"secretKey"'));
   step('backup downloads encrypted keys plus the wallet descriptor');
 
+  // 10. Settings UI and auto-lock: set one minute, stay idle, and the wallet locks itself.
+  await popup.locator('nav').getByRole('button', { name: 'Settings' }).click();
+  await popup.getByLabel('Auto-lock after (minutes)').fill('1');
+  await popup.getByRole('button', { name: 'Save' }).click();
+  await popup.getByText('Saved.').waitFor({ timeout: 30000 }).catch(() => {});
+  const saved = await popup.evaluate(async () => (await chrome.storage.local.get('settings')).settings);
+  assert.equal(saved.autoLockMinutes, 1);
+  assert.equal(saved.cluster, 'localnet');
+  await shot(popup, '09-settings');
+  await sleep(80000);
+  assert.equal(await popup.evaluate(async () => Boolean((await chrome.storage.session.get('unlocked')).unlocked)), false);
+  await popup.reload();
+  await popup.getByRole('heading', { name: 'Welcome back' }).waitFor({ timeout: 30000 });
+  step('settings save through the UI and the wallet auto-locks after the idle period');
+
   mkdirSync(join(root, 'evidence'), { recursive: true });
   writeFileSync(
     join(root, 'evidence/e2e.json'),

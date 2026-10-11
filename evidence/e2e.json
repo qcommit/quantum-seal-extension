@@ -1,7 +1,7 @@
 {
   "status": "passed",
-  "finishedAt": "2026-10-11T06:00:06.509Z",
-  "program": "5mhyrSWwLXYMc7vwok5buJ6cGcwKcem7Gv8jdMAJdoYD",
+  "finishedAt": "2026-10-11T06:08:16.962Z",
+  "program": "81BQoDsATQethG7Xk5xFZFRyxxhRi1ikt8YRKHzH77nx",
   "steps": [
     "local validator runs the wallet program",
     "extension loads and is pinned to the local deployment",
@@ -15,6 +15,7 @@
     "home lists the wallet’s SPL token balance",
     "an SPL token send completes through the review window",
     "lock clears access; a wrong passphrase is refused; the right one unlocks",
-    "backup downloads encrypted keys plus the wallet descriptor"
+    "backup downloads encrypted keys plus the wallet descriptor",
+    "settings save through the UI and the wallet auto-locks after the idle period"
   ]
 }
