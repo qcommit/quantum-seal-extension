@@ -15,6 +15,7 @@ import {
   SETTINGS_KEY,
 } from './common.js';
 import {
+  ActionButton,
   CopyButton,
   Loading,
   Mark,
@@ -33,14 +34,25 @@ import { SettingsPage, BackupPage, PassphrasePage, RemovePage } from './settings
 
 function App() {
   const [gate, setGate] = useState('loading');
+  const [gateError, setGateError] = useState(null);
   // Only the newest gate check may apply, so a slow check can never undo a lock.
   const seq = useRef(0);
   const checkGate = useCallback(async () => {
     const n = ++seq.current;
-    const exists = await vault.exists();
-    if (exists) await pinNetworkChoice();
-    const unlocked = exists && (await vault.isUnlocked());
-    if (n === seq.current) setGate(!exists ? 'welcome' : unlocked ? 'ready' : 'locked');
+    try {
+      const exists = await vault.exists();
+      if (exists) await pinNetworkChoice();
+      const unlocked = exists && (await vault.isUnlocked());
+      if (n === seq.current) {
+        setGateError(null);
+        setGate(!exists ? 'welcome' : unlocked ? 'ready' : 'locked');
+      }
+    } catch (error) {
+      if (n === seq.current) {
+        setGateError(error);
+        setGate('error');
+      }
+    }
   }, []);
   useEffect(() => {
     checkGate();
@@ -60,10 +72,41 @@ function App() {
         <Loading label="Opening Quantum Seal" />
       </div>
     );
+  if (gate === 'error')
+    return (
+      <LoadFailure
+        title="Could not open Quantum Seal"
+        error={gateError}
+        onRetry={() => {
+          setGate('loading');
+          checkGate();
+        }}
+      />
+    );
   if (gate === 'welcome') return <Welcome onDone={checkGate} />;
   if (gate === 'locked') return <Unlock onDone={checkGate} />;
   // A fresh wallet shell after every unlock: it always opens on Home.
   return <Wallet onLock={lock} onRemoved={checkGate} />;
+}
+
+function LoadFailure({ title, error, busy = false, onRetry, onLock }) {
+  return (
+    <div className="gate">
+      <main className="gate-body gate-center">
+        <Mark size="lg" />
+        <h1>{title}</h1>
+        <Notice kind="error">{errorText(error)}</Notice>
+        <ActionButton busy={busy} onClick={onRetry}>
+          Try again
+        </ActionButton>
+        {onLock ? (
+          <button type="button" className="secondary full" onClick={onLock}>
+            Lock wallet
+          </button>
+        ) : null}
+      </main>
+    </div>
+  );
 }
 
 function Wallet({ onLock, onRemoved }) {
@@ -96,6 +139,16 @@ function Wallet({ onLock, onRemoved }) {
       .then(({ reclaimed }) => reclaimed && setReloadKey((k) => k + 1))
       .catch(() => {});
   }, [cluster]);
+  if (settings.error)
+    return (
+      <LoadFailure
+        title="Could not load wallet settings"
+        error={settings.error}
+        busy={settings.loading}
+        onRetry={() => setSettingsVersion((v) => v + 1)}
+        onLock={onLock}
+      />
+    );
   if (!settings.data)
     return (
       <div className="gate">

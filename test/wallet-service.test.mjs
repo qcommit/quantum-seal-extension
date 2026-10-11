@@ -555,6 +555,142 @@ test('a discarded send that someone else executes shows as sent', async () => {
   assert.equal(after.executedElsewhere, true);
 });
 
+test('a watched discarded send remains unfinished after its deposit is reclaimed', async () => {
+  const t = await setup();
+  const { record } = await interruptedSend(t);
+  await edit(t.storage, record.id, (r) => (r.status = 'failed'));
+  const discarded = await t.service.discardSend(record.id);
+  assert.equal(discarded.reclaimed, true);
+  assert.equal(mayStillExecute(discarded), true);
+  assert.deepEqual(await t.service.unfinishedSends(), { count: 1, lamports: 0n });
+  await assert.rejects(t.service.removeWallet(), /1 send is not finished/);
+  assert.equal(await t.vault.exists(), true);
+  assert.ok(await stored(t.storage, record.id), 'removal refusal preserves the execution watch');
+  // Even a full finished-history bucket must retain the watch until the approval expires.
+  const finished = {};
+  for (let i = 0; i <= MAX_FINISHED_SENDS; i++)
+    finished[`send:finished${i}`] = { id: `finished${i}`, status: 'done', createdAt: new Date(Date.UTC(2026, 0, 2, 0, 0, i)).toISOString(), records: [] };
+  await t.storage.local.set(finished);
+  await t.service.reclaimAbandoned();
+  assert.equal(mayStillExecute(await stored(t.storage, record.id)), true);
+  assert.equal((await t.service.listSends()).filter((r) => r.status === 'done').length, MAX_FINISHED_SENDS);
+  t.chain.slot = BigInt(record.expiry) + 1n;
+  await t.service.reclaimAbandoned();
+  assert.deepEqual(await t.service.unfinishedSends(), { count: 0, lamports: 0n });
+  await t.service.removeWallet();
+  assert.equal(await t.vault.exists(), false);
+});
+
+test('a watched discarded send waits for the reference endpoint to confirm expiry', async () => {
+  const t = await setup();
+  const { record } = await interruptedSend(t);
+  await edit(t.storage, record.id, (r) => (r.status = 'failed'));
+  await t.service.discardSend(record.id);
+  let referenceSlot = t.chain.slot;
+  const reference = { ...t.chain.connection, getSlot: async () => referenceSlot };
+  const service = createWalletService({ vault: t.vault, storage: t.storage, connect: () => t.chain.connection, referenceOverride: () => reference });
+  t.chain.slot = BigInt(record.expiry) + 1n;
+  await service.reclaimAbandoned();
+  const waiting = await stored(t.storage, record.id);
+  assert.ok(waiting, 'one RPC claiming expiry must not delete the execution watch');
+  assert.equal(mayStillExecute(waiting), true);
+  assert.match(waiting.error, /do not agree/);
+  referenceSlot = t.chain.slot;
+  await service.reclaimAbandoned();
+  assert.equal(await stored(t.storage, record.id), undefined, 'both endpoints confirm expiry');
+});
+
+test('a watched discarded send waits for the reference endpoint to confirm a moved nonce', async () => {
+  const t = await setup();
+  const { record } = await interruptedSend(t);
+  await edit(t.storage, record.id, (r) => (r.status = 'failed'));
+  await t.service.discardSend(record.id);
+  let referenceWallet = await t.chain.connection.getAccountInfo(new PublicKey(t.d.wallet));
+  const reference = { ...t.chain.connection, getAccountInfo: async () => referenceWallet };
+  const service = createWalletService({ vault: t.vault, storage: t.storage, connect: () => t.chain.connection, referenceOverride: () => reference });
+  await t.chain.setWallet(t.d, { nonce: 1n });
+  await service.reclaimAbandoned();
+  const waiting = await stored(t.storage, record.id);
+  assert.ok(waiting, 'one RPC claiming a moved nonce must not delete the execution watch');
+  assert.equal(mayStillExecute(waiting), true);
+  assert.match(waiting.error, /do not agree/);
+  referenceWallet = await t.chain.connection.getAccountInfo(new PublicKey(t.d.wallet));
+  await service.reclaimAbandoned();
+  assert.equal(await stored(t.storage, record.id), undefined, 'both endpoints confirm the approval cannot run');
+});
+
+test('removeWallet rechecks a review approved after its initial unfinished check', async () => {
+  const t = await setup();
+  const record = await t.service.prepareSend({ to: await key(), amount: '0.01' });
+  const get = t.storage.local.get.bind(t.storage.local);
+  let snapshots = 0;
+  t.storage.local.get = async (keys) => {
+    if (keys === null && ++snapshots === 2)
+      // Another review window finishes approval before removal takes the send's lock.
+      await t.service.approve(record.id, record.digest);
+    return get(keys);
+  };
+  await assert.rejects(t.service.removeWallet(), /1 send is not finished/);
+  assert.equal(await t.vault.exists(), true);
+  assert.equal((await stored(t.storage, record.id)).status, 'signed');
+});
+
+test('removeWallet coordinates a newly prepared review with its send-lock snapshot', async () => {
+  const t = await setup();
+  const to = await key();
+  let resume, reached;
+  const paused = new Promise((resolve) => { reached = resolve; });
+  const gate = new Promise((resolve) => { resume = resolve; });
+  const rent = t.chain.connection.getMinimumBalanceForRentExemption;
+  t.chain.connection.getMinimumBalanceForRentExemption = async (bytes) => {
+    // This is prepareSolTransfer's last RPC, immediately before the review is saved.
+    if (bytes === 0) { reached(); await gate; }
+    return rent(bytes);
+  };
+  const creating = t.service.prepareSend({ to, amount: '0.01' });
+  creating.catch(() => {});
+  await paused;
+  const get = t.storage.local.get.bind(t.storage.local);
+  let snapshots = 0;
+  t.storage.local.get = async (keys) => {
+    const snapshot = await get(keys);
+    if (keys === null && ++snapshots === 2) {
+      // The IDs snapshot is already taken. A second popup completes preparation before
+      // removal continues. Remaining fake RPC work resolves in microtasks.
+      resume();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    return snapshot;
+  };
+  await t.service.removeWallet();
+  const [creation] = await Promise.allSettled([creating]);
+  assert.equal(creation.status, 'rejected', 'a new review must not commit through an ID missed by removal');
+  assert.match(creation.reason.message, /No wallet|wallet changed/);
+  assert.equal(await t.vault.exists(), false);
+  assert.deepEqual(await t.service.listSends(), [], 'no journal is recreated after removal');
+});
+
+test('prepareSend refuses to commit after its owner vault is removed or replaced', async () => {
+  for (const replace of [false, true]) {
+    const t = await setup();
+    const to = await key();
+    let resume, reached;
+    const paused = new Promise((resolve) => { reached = resolve; });
+    const gate = new Promise((resolve) => { resume = resolve; });
+    const getSlot = t.chain.connection.getSlot;
+    t.chain.connection.getSlot = async (...args) => { reached(); await gate; return getSlot(...args); };
+    const preparing = t.service.prepareSend({ to, amount: '0.01' });
+    preparing.catch(() => {});
+    await paused;
+    await t.service.removeWallet();
+    if (replace) await t.vault.create(pass);
+    resume();
+    await assert.rejects(preparing, /No wallet|wallet changed/);
+    assert.deepEqual(await t.service.listSends(), [], 'stale preparation must not leave a review for the previous vault');
+    assert.equal(await t.vault.exists(), replace);
+  }
+});
+
 test('approve refuses an expiry set from a slot reported too far ahead', async () => {
   const t = await setup();
   t.chain.slot = 1000000n;

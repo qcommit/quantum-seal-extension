@@ -386,7 +386,7 @@ export function createWalletService({
       .map(([, v]) => v);
   }
   async function openSends() {
-    return (await allSends()).filter((r) => UNFINISHED_SIGNED.includes(r.status) || needsReclaim(r));
+    return (await allSends()).filter((r) => UNFINISHED_SIGNED.includes(r.status) || needsReclaim(r) || mayStillExecute(r));
   }
   async function getSend(id) {
     await migrate();
@@ -403,7 +403,7 @@ export function createWalletService({
   // ones whose proof deposit is still open, are never dropped.
   async function prune() {
     const finished = (await allSends())
-      .filter((r) => FINISHED.includes(r.status) && !needsReclaim(r))
+      .filter((r) => FINISHED.includes(r.status) && !needsReclaim(r) && !mayStillExecute(r))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const drop = finished.slice(MAX_FINISHED_SENDS).map((r) => sendKey(r.id));
     if (drop.length) await storage.local.remove(drop);
@@ -507,19 +507,29 @@ export function createWalletService({
   // For a watched discarded send: did someone execute it after all, or can it no longer run?
   async function settleDiscarded(record, network, d, deployment) {
     const intent = decodeIntent(fromHex(record.intentHex));
+    const reference = referenceFor(deployment);
+    const stopWatching = async (outcome) => {
+      if (await corroborate(reference, outcome)) {
+        record.watchSettled = true;
+        record.error = null;
+      } else record.error = DISAGREE_TEXT;
+      return record;
+    };
     const status = await walletStatus(network, d);
     if (status.initialized && (status.state.nonce !== intent.nonce || status.state.epoch !== intent.epoch)) {
       const found = await findExecution(network, record);
       if (found) {
         // Until the public endpoint confirms it (custom mainnet RPC only), keep watching.
-        if (!(await corroborate(referenceFor(deployment), { status: 'done', signature: found }))) return record;
+        if (!(await corroborate(reference, { status: 'done', signature: found }))) {
+          record.error = DISAGREE_TEXT;
+          return record;
+        }
         return finish(record, 'done', { executeSignature: found, executedElsewhere: true });
       }
-      record.watchSettled = true;
-      return record;
+      return stopWatching({ status: 'superseded', wallet: d.wallet, nonce: intent.nonce, epoch: intent.epoch });
     }
     const slot = BigInt(await network.connection.getSlot(network.commitment));
-    if (intent.expiry < slot) record.watchSettled = true;
+    if (intent.expiry < slot) return stopWatching({ status: 'expired', expiry: intent.expiry });
     return record;
   }
   async function reclaim(record, network) {
@@ -790,7 +800,7 @@ export function createWalletService({
       }
       const intent = decodeIntent(prepared.bytes);
       const id = hex(globalThis.crypto.getRandomValues(new Uint8Array(12)));
-      return saveSend({
+      const record = {
         id,
         cluster: network.cluster,
         program: network.program,
@@ -809,6 +819,14 @@ export function createWalletService({
         approval: null,
         records: [],
         error: null,
+      };
+      // Only review creation and removal share this short lock. RPC work stays outside;
+      // once removal snapshots send IDs, no new review can appear outside that lock set.
+      return withLock('journal-create', async () => {
+        const current = await ownerInfo();
+        if (current.ownerPublicKey !== info.ownerPublicKey || current.feePayer !== info.feePayer)
+          throw new Error('Your wallet changed while this send was being prepared. Prepare the send again.');
+        return saveSend(record);
       });
     },
 
@@ -1066,36 +1084,45 @@ export function createWalletService({
     // journal would leave their proof deposits to be found by hand.
     async unfinishedSends() {
       const open = await openSends();
-      const lamports = open.reduce((sum, r) => sum + BigInt(r.refundableRentLamports ?? '0'), 0n);
+      const lamports = open.reduce((sum, r) => sum + (r.reclaimed ? 0n : BigInt(r.refundableRentLamports ?? '0')), 0n);
       return { count: open.length, lamports };
     },
     // Removes the wallet from this browser profile: keys, send journal and cached history.
     // Settings (network, RPC endpoint, auto-lock) stay. Refuses while sends are unfinished
     // unless the caller has shown that to the user and they chose to go ahead.
     async removeWallet({ evenWithUnfinished = false } = {}) {
-      const count = (await openSends()).length;
-      if (count && !evenWithUnfinished)
-        throw new Error(
-          `${count} send${count === 1 ? ' is' : 's are'} not finished. Open Activity to finish or discard ${count === 1 ? 'it' : 'them'} first.`,
-        );
-      // Hold every send's lock, so no review window is mid-send while its journal goes.
-      const ids = (await allSends()).map((r) => r.id);
-      const holdingAll = (rest, fn) =>
-        rest.length
-          ? withLock(`send:${rest[0]}`, () => holdingAll(rest.slice(1), fn), {
-              ifAvailable: true,
-              busyMessage: 'A send is running in another window. Let it finish or close that window, then try again.',
-            })
-          : fn();
-      await holdingAll(ids, async () => {
-        await vault.remove();
-        const all = await storage.local.get(null);
-        const keys = Object.keys(all).filter(
-          (k) => isSendKey(k) || k.startsWith(RECEIPTS_PREFIX) || k === LEGACY_SENDS_KEY,
-        );
-        if (keys.length) await storage.local.remove(keys);
+      const checkUnfinished = async () => {
+        const count = (await openSends()).length;
+        if (count && !evenWithUnfinished)
+          throw new Error(
+            `${count} send${count === 1 ? ' is' : 's are'} not finished. Open Activity to finish or discard ${count === 1 ? 'it' : 'them'} first.`,
+          );
+      };
+      await checkUnfinished();
+      await withLock('journal-create', async () => {
+        // Freeze review creation while taking every send's lock. Existing sends still use
+        // their own locks; a running one refuses removal immediately instead of waiting.
+        const ids = (await allSends()).map((r) => r.id);
+        const holdingAll = (rest, fn) =>
+          rest.length
+            ? withLock(`send:${rest[0]}`, () => holdingAll(rest.slice(1), fn), {
+                ifAvailable: true,
+                busyMessage: 'A send is running in another window. Let it finish or close that window, then try again.',
+              })
+            : fn();
+        await holdingAll(ids, async () => {
+          // A review could have finished signing between the first check and acquiring its
+          // lock. Its signed approval must not lose its journal without the override.
+          await checkUnfinished();
+          await vault.remove();
+          const all = await storage.local.get(null);
+          const keys = Object.keys(all).filter(
+            (k) => isSendKey(k) || k.startsWith(RECEIPTS_PREFIX) || k === LEGACY_SENDS_KEY,
+          );
+          if (keys.length) await storage.local.remove(keys);
+        });
+        cached = null;
       });
-      cached = null;
     },
     // Opens the recipient's associated token account for `mint`, paid by the fee key, after
     // the user agreed on the Send page. It is not part of any signed approval: it only spends

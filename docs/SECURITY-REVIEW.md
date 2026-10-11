@@ -1,5 +1,15 @@
 # Extension security review (2026-10-11)
 
+## Local follow-up hardening
+
+A subsequent source review and failure-path iteration identified gaps beyond the
+original checks below. The current local changes require saved-file acknowledgement
+bound to the exported encrypted keys; fail closed on removal-prerequisite errors;
+retain discarded-approval watches while RPC endpoints disagree; and coordinate new
+review creation with wallet removal. Regression tests cover cancelled downloads,
+changed backup snapshots, storage failures and deterministic cross-window races.
+This follow-up is local automated review and testing, not an independent audit.
+
 An automated reviewer with read access to the source reviewed the extension's own logic
 (key vault, send journal, review window, network pinning, background worker, build). It
 is not an independent third-party audit. The on-chain program has its own reviews in the

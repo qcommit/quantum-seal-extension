@@ -1,7 +1,7 @@
 // Settings (RPC override, auto-lock, developer pins, backup, lock) and the backup page.
 import { useRef, useState } from 'react';
 import { BUILT_IN, deploymentFor, isAvailable, networkConfig } from '../networks.js';
-import { vault, service, getSettings, saveSettings, touch, solDisplay } from './common.js';
+import { vault, service, getSettings, saveSettings, touch, solDisplay, errorText } from './common.js';
 import { ActionButton, ActionNotice, Field, Loading, Notice, useAction, useLoad } from './components.jsx';
 import { Alert, ArrowLeft, ChevronRight, Code, Download, Key, Lock, Shield } from './icons.jsx';
 
@@ -14,7 +14,16 @@ const PIN_FIELDS = [
 ];
 
 export function SettingsPage({ onBack, onBackup, onLock, onPassphrase, onRemove }) {
-  const loaded = useLoad(() => getSettings(), []);
+  const [attempt, setAttempt] = useState(0);
+  const loaded = useLoad(() => getSettings(), [attempt]);
+  if (loaded.error)
+    return (
+      <>
+        <PageHeading title="Settings" onBack={onBack} />
+        <Notice kind="error">Could not load settings. {errorText(loaded.error)}</Notice>
+        <ActionButton busy={loaded.loading} onClick={() => setAttempt((n) => n + 1)}>Try again</ActionButton>
+      </>
+    );
   if (!loaded.data) return <Loading label="Loading settings" />;
   return (
     <SettingsForm
@@ -226,9 +235,11 @@ function SettingsForm({ initial, onBack, onBackup, onLock, onPassphrase, onRemov
 }
 
 export function BackupPage({ onBack }) {
+  const [downloaded, setDownloaded] = useState(null);
   const { busy, notice, run } = useAction();
   const download = () =>
     run(async () => {
+      setDownloaded(null);
       const data = await vault.exportBackup();
       const blob = new Blob([JSON.stringify(data, null, 2) + '\n'], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -239,8 +250,14 @@ export function BackupPage({ onBack }) {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      await vault.markBackedUp();
-      return 'Backup downloaded. Keep the file and your passphrase somewhere safe.';
+      setDownloaded(data);
+      return 'Download requested. Save the file, then confirm below.';
+    });
+  const confirm = () =>
+    run(async () => {
+      await vault.markBackedUp(downloaded);
+      setDownloaded(null);
+      return 'Backup saved. Keep the file and your passphrase somewhere safe.';
     });
   return (
     <>
@@ -265,6 +282,11 @@ export function BackupPage({ onBack }) {
         <ActionButton busy={busy} icon={<Download size={16} />} onClick={download}>
           Download backup
         </ActionButton>
+        {downloaded ? (
+          <ActionButton className="secondary full" busy={busy} onClick={confirm}>
+            I saved my backup file
+          </ActionButton>
+        ) : null}
         <ActionNotice notice={notice} />
       </div>
     </>
@@ -342,13 +364,30 @@ export function PassphrasePage({ onBack, onBackup }) {
 export function RemoveWallet({ onRemoved, intro, locked = false }) {
   const [ack, setAck] = useState(false);
   const [typed, setTyped] = useState('');
-  const open = useLoad(async () => ({ ...(await service.unfinishedSends()), info: await vault.publicInfo() }), []);
+  const [attempt, setAttempt] = useState(0);
+  const open = useLoad(async () => ({ ...(await service.unfinishedSends()), info: await vault.publicInfo() }), [attempt]);
+  const ready = Boolean(open.data?.info) && !open.error && !open.loading;
   // Never backed up: removing it loses the funds for good, so ask for the word itself.
   const unsaved = open.data?.info && !open.data.info.backedUp;
   const { busy, notice, run } = useAction();
   const remove = () =>
     run(async () => {
-      await service.removeWallet({ evenWithUnfinished: true });
+      // The acknowledgement applies to the wallet and pending sends shown here.
+      // Refresh instead of deleting if another page changed them in the meantime.
+      const latest = { ...(await service.unfinishedSends()), info: await vault.publicInfo() };
+      if (
+        !ready || !latest.info ||
+        latest.info.ownerPublicKey !== open.data.info.ownerPublicKey ||
+        latest.info.feePayer !== open.data.info.feePayer ||
+        latest.info.backedUp !== open.data.info.backedUp ||
+        latest.count !== open.data.count || latest.lamports !== open.data.lamports
+      ) {
+        setAck(false);
+        setTyped('');
+        setAttempt((n) => n + 1);
+        throw new Error('The wallet or unfinished sends changed. Review the updated details before removing it.');
+      }
+      await service.removeWallet({ evenWithUnfinished: open.data.count > 0 });
       onRemoved();
     });
   const pending = open.data?.count ?? 0;
@@ -362,6 +401,17 @@ export function RemoveWallet({ onRemoved, intro, locked = false }) {
           recovered.</strong>
         </p>
       </div>
+      {open.loading ? <Loading label="Checking wallet and unfinished sends" /> : null}
+      {open.error || (!open.loading && !open.data?.info) ? (
+        <>
+          <Notice kind="error">Could not check the wallet and unfinished sends. Try again before removing it.</Notice>
+          <ActionButton className="secondary full" busy={open.loading} onClick={() => {
+            setAck(false);
+            setTyped('');
+            setAttempt((n) => n + 1);
+          }}>Try again</ActionButton>
+        </>
+      ) : null}
       {pending ? (
         <Notice kind="warn">
           {pending} send{pending === 1 ? ' is' : 's are'} not finished
@@ -369,6 +419,7 @@ export function RemoveWallet({ onRemoved, intro, locked = false }) {
           removal {open.data.lamports > 0n ? 'that SOL stays locked in its proof account, and ' : ''}restoring the backup
           does not bring {pending === 1 ? 'it' : 'them'} back.
           {locked ? '' : ` Finish or discard ${pending === 1 ? 'it' : 'them'} in Activity first.`}
+          {' '}Removing the history does not cancel an approval that was already published.
         </Notice>
       ) : null}
       {unsaved ? (
@@ -383,7 +434,7 @@ export function RemoveWallet({ onRemoved, intro, locked = false }) {
         </>
       ) : null}
       <label className="check-row">
-        <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+        <input type="checkbox" checked={ack} disabled={!ready || busy} onChange={(e) => setAck(e.target.checked)} />
         <span>
           {unsaved
             ? 'I understand this wallet and its funds cannot be recovered without a backup.'
@@ -393,7 +444,7 @@ export function RemoveWallet({ onRemoved, intro, locked = false }) {
       <ActionButton
         className="danger full"
         busy={busy}
-        disabled={!ack || open.loading || (unsaved && typed.trim() !== 'REMOVE')}
+        disabled={!ack || !ready || (unsaved && typed.trim() !== 'REMOVE')}
         onClick={remove}
       >
         Remove wallet from this browser

@@ -3,6 +3,19 @@
 Store uploads need a higher `version` in `src/manifest.json` (and `package.json`) each
 time; add an entry here for every upload.
 
+## Unreleased — recovery and cross-window hardening
+
+- A requested backup download keeps the reminder until the user confirms the file
+  was saved. Confirmation is tied to the exported encrypted keys, so a changed wallet
+  or passphrase cannot acknowledge an older backup as current.
+- Wallet and settings loading failures offer retry instead of leaving a spinner.
+  Removal stays disabled until backup and unfinished-send checks succeed, and refreshes
+  its confirmation if their state changes.
+- Published approvals remain watched after discard and rent reclamation. Custom-RPC
+  expiry and nonce changes need reference confirmation before the watch ends.
+- Review creation and wallet removal coordinate across windows; stale preparations
+  cannot recreate a send journal after its wallet was removed or replaced.
+
 ## 0.1.0 (first store release, not yet submitted)
 
 The first version of Quantum Seal for Chrome: a post-quantum Solana wallet that holds,

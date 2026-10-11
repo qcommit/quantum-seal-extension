@@ -1,0 +1,57 @@
+{
+  "status": "verified local iteration checkpoint",
+  "finished_at": "2026-10-11T19:56:24.208814+00:00",
+  "source_chat": {
+    "provider": "Claude Code",
+    "session_id": "3c0f7490-e1b0-4c53-93bf-24ec71e33622",
+    "scope": "Quantum Seal wallet, extension and website; existing implementation continued"
+  },
+  "changes": [
+    "Saved-backup acknowledgement bound to exported encrypted keys",
+    "Failed startup/settings reads recover with retry",
+    "Wallet removal fails closed and refreshes stale prerequisites",
+    "Discarded published approvals remain watched after rent reclamation",
+    "Reference-confirmed discarded-send expiry/nonce outcomes",
+    "Coordinated new review creation and wallet removal; stale preparations rejected"
+  ],
+  "checks": {
+    "unit_tests": {
+      "passed": 73,
+      "failed": 0,
+      "runtime": "Node 22.22.0"
+    },
+    "regressions_that_failed_before_fixes": 8,
+    "actual_local_validator_browser": {
+      "passed_steps": 26,
+      "evidence": "evidence/e2e.json"
+    },
+    "visual_fixture_screens": 10,
+    "axe_violations": 0,
+    "actual_screens_visually_inspected": [
+      ".runtime/shots/00-open-error.png",
+      ".runtime/shots/02b-removal-error.png",
+      ".runtime/shots/02b-removal-recovered.png",
+      ".runtime/shots/07b-backup-confirm.png"
+    ],
+    "release_smoke": "passed; read-only devnet; no public funding or sends",
+    "git_diff_check": "passed"
+  },
+  "artifact": {
+    "path": "/home/dzliu/pzliu/quantum-seal-extension/release/quantum-seal-extension-0.1.0-draft.zip",
+    "bytes": 603135,
+    "sha256": "9b372fa9cdbb8c38fdf272f549eea30664aece44e06e85abab9f8bf0ecf7bc14",
+    "kind": "local draft ZIP; mainnet unpinned; not a store submission",
+    "core_commit": "1c31c1a04bf48ed05b7fd5d4dc7ccbbfcf80594a"
+  },
+  "remaining_release_steps": [
+    "User-owned mainnet deployment and verified pinning",
+    "Public source/store release decisions",
+    "Build final mainnet package after pinning"
+  ],
+  "next_authorized_iteration": [
+    "Verify the new journal lifecycle with two actual browser popups/review windows, supplementing deterministic unit race cases.",
+    "Continue the disposable-user walkthrough and prioritize reproducible recovery or usability defects; avoid changes to verified cryptography without protocol cases."
+  ],
+  "working_tree": "Changes remain local and uncommitted; no public deployment or publication occurred.",
+  "resource_cleanup": "Local validator and disposable Chromium contexts cleaned by test runners; shared browser lock released."
+}

@@ -73,12 +73,38 @@ test('a wallet counts as backed up once a backup is saved or it was restored fro
   assert.equal((await first.publicInfo()).backedUp, false);
   const backup = await first.exportBackup();
   assert.equal((await first.publicInfo()).backedUp, false, 'exporting alone is not saving');
-  await first.markBackedUp();
+  await first.markBackedUp(backup);
   assert.equal((await first.publicInfo()).backedUp, true);
   const second = createVaultStore(fakeStorage());
   await second.importBackup(JSON.stringify(backup), pass);
   assert.equal((await second.publicInfo()).backedUp, true);
   await assert.rejects(createVaultStore(fakeStorage()).markBackedUp(), /No wallet/);
+});
+
+test('a backup acknowledgement cannot mark replacement keys or a changed passphrase as saved', async () => {
+  const storage = fakeStorage();
+  const vault = createVaultStore(storage);
+  await vault.create(pass);
+  const old = await vault.exportBackup();
+  await vault.changePassphrase(pass, 'another long test passphrase');
+  await assert.rejects(vault.markBackedUp(old), /changed.*download.*backup/i);
+  assert.equal((await vault.publicInfo()).backedUp, false);
+  const current = await vault.exportBackup();
+  await vault.markBackedUp(current);
+  assert.equal((await vault.publicInfo()).backedUp, true);
+  await vault.remove();
+  await vault.create(pass);
+  await assert.rejects(vault.markBackedUp(current), /changed.*download.*backup/i);
+  assert.equal((await vault.publicInfo()).backedUp, false);
+});
+
+test('a backup acknowledgement requires the exact exported encrypted keys', async () => {
+  const vault = createVaultStore(fakeStorage());
+  await vault.create(pass);
+  await assert.rejects(vault.markBackedUp(), /download.*backup/i);
+  const backup = await vault.exportBackup();
+  await assert.rejects(vault.markBackedUp({ ...backup, fee: { ...backup.fee, ciphertext: 'changed' } }), /changed.*download.*backup/i);
+  assert.equal((await vault.publicInfo()).backedUp, false);
 });
 
 // A backup whose keystores are genuine (the real passphrase opens them) but whose public

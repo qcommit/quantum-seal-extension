@@ -58,7 +58,7 @@ an SPL token send, a fee key below its float refilled from the wallet, lock and 
 wrong passphrase, backup download, an injected RPC failure that leaves a send
 "uncertain" until it is checked and resumed, two sends at the same nonce where the
 superseded one is reported "Not sent" and its proof deposit reclaimed, and auto-lock set
-through Settings, passphrase change, forgot-passphrase recovery from the backup, a token send that opens the recipient's token account, and a send approved only with the passphrase when Settings asks for it (21 steps). CI runs it on every push, against the wallet program built from the pinned core commit and checked against its canonical hash. `e2e/release-smoke.mjs` checks the release build. `npm run visual` renders every UI state from fixtures and fails on any axe-core accessibility violation (also run in CI). `e2e/devnet-smoke.mjs` runs create, setup and a
+through Settings, passphrase change, forgot-passphrase recovery from the backup, a token send that opens the recipient's token account, and a send approved only with the passphrase when Settings asks for it (21 steps). CI runs it on every push, against the wallet program built from the pinned core commit and checked against its canonical hash. `e2e/release-smoke.mjs` checks the release build. `e2e/two-window.mjs` opens several extension windows at once: one send approved in two review windows executes once, removal is refused while a send uploads, and a review window left open after removal cannot sign. `npm run visual` renders every UI state from fixtures and fails on any axe-core accessibility violation (also run in CI). `e2e/devnet-smoke.mjs` runs create, setup and a
 send against the public devnet deployment, with a funded devnet key supplied via
 `QS_DEVNET_FUNDER` (kept outside the repository). `QS_E2E_SHOTS=1 npm run e2e` also
 saves a screenshot of each screen it reaches to `.runtime/shots/`.
@@ -81,5 +81,18 @@ a pattern to render only some states: `node e2e/visual.mjs '^review'`.
 - Not yet listed on the Chrome Web Store. See [docs/STORE-LISTING.md](docs/STORE-LISTING.md)
   and [PRIVACY.md](PRIVACY.md).
 - Not independently audited.
+
+### Recovery hardening (local iteration, 2026-10-11)
+
+Requesting a backup download does not clear the reminder: save the file, then choose
+**I saved my backup file**. If another window changes the wallet or passphrase before
+confirmation, download a fresh backup. Failed wallet/settings reads can be retried;
+wallet removal stays disabled until its prerequisite checks succeed.
+
+Discarded approvals that were already published remain watched until their outcome
+or expiry is established, including after their proof rent returns. Review creation
+and removal share a short journal lock so another window cannot create an unseen
+review during removal. Regression coverage is in `test/vault.test.mjs`,
+`test/wallet-service.test.mjs` and the actual local-validator browser flow in `e2e/run.mjs`.
 
 MIT licensed.

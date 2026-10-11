@@ -1,0 +1,11 @@
+{
+  "status": "passed",
+  "finishedAt": "2026-10-11T20:33:10.078Z",
+  "cluster": "localnet",
+  "steps": [
+    "a disposable wallet is created and set up on the local validator",
+    "the same send approved in two review windows at once executes exactly once, and both show Sent",
+    "removing the wallet from another popup while a send uploads is refused; the send completes and Activity updates",
+    "removing the wallet with an unapproved review open succeeds; the stale window signs and moves nothing"
+  ]
+}

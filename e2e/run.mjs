@@ -123,9 +123,30 @@ try {
   worker ??= await context.waitForEvent('serviceworker');
   const extensionId = new URL(worker.url()).host;
   const popup = await context.newPage();
+  // Inject transient storage failures in the real extension page, without replacing
+  // the vault/service code. Other pages (including the signing worker) are untouched.
+  await popup.addInitScript(() => {
+    const get = chrome.storage.local.get.bind(chrome.storage.local);
+    const key = new URL(location.href).searchParams.get('failStorage');
+    window.__storageFault = { key, remaining: key ? 1 : 0 };
+    chrome.storage.local.get = async (keys) => {
+      const fault = window.__storageFault;
+      if (fault?.remaining && keys === fault.key) {
+        fault.remaining--;
+        throw new Error('Storage is temporarily unavailable.');
+      }
+      return get(keys);
+    };
+  });
   // The toolbar popup is 400x600.
   await popup.setViewportSize({ width: 400, height: 600 });
   const popupUrl = `chrome-extension://${extensionId}/popup.html`;
+  await popup.goto(`${popupUrl}?failStorage=vault`);
+  await popup.getByRole('heading', { name: 'Could not open Quantum Seal' }).waitFor();
+  await shot(popup, '00-open-error');
+  await popup.getByRole('button', { name: 'Try again', exact: true }).click();
+  await popup.getByPlaceholder('Passphrase (12+ characters)').waitFor();
+  step('a transient wallet-open failure is visible and retry recovers');
   await popup.goto(popupUrl);
   // A development build is pinned to this validator through Settings storage.
   await popup.evaluate(
@@ -184,6 +205,40 @@ try {
   assert.ok(feeAfterSetup >= 69000000n && feeAfterSetup <= 70000000n, `fee float ${feeAfterSetup}`);
   await shot(popup, '03-home');
   step('one funding transfer creates the wallet and moves the rest behind the post-quantum key');
+
+  // A settings failure must show an actionable error instead of a permanent spinner.
+  await popup.evaluate(async () => {
+    const { settings } = await chrome.storage.local.get('settings');
+    window.__storageFault = { key: 'settings', remaining: 1 };
+    await chrome.storage.local.set({ settings: { ...settings, autoLockMinutes: 16 } });
+  });
+  await popup.getByRole('heading', { name: 'Could not load wallet settings' }).waitFor();
+  await popup.getByRole('button', { name: 'Try again', exact: true }).click();
+  await popup.locator('.balance .amount').waitFor({ timeout: 60000 });
+  step('wallet settings recover after a transient storage failure');
+  await popup.evaluate(() => { window.__storageFault = { key: 'settings', remaining: 1 }; });
+  await popup.getByRole('button', { name: 'Settings', exact: true }).click();
+  await popup.getByText('Could not load settings.', { exact: false }).waitFor();
+  await popup.getByRole('button', { name: 'Try again', exact: true }).click();
+  await popup.getByLabel('Auto-lock after (minutes)').waitFor();
+  step('the Settings page reports a failed read and retries successfully');
+
+  // Unknown backup/deposit state must never enable destructive wallet removal.
+  await popup.evaluate(() => { window.__storageFault = { key: 'vault', remaining: 1 }; });
+  await popup.getByRole('button', { name: /Remove from this browser/ }).click();
+  await popup.getByText('Could not check the wallet and unfinished sends.', { exact: false }).waitFor();
+  assert.equal(await popup.locator('input[type="checkbox"]').isDisabled(), true);
+  assert.equal(await popup.getByRole('button', { name: 'Remove wallet from this browser' }).isEnabled(), false);
+  await shot(popup, '02b-removal-error');
+  await popup.getByRole('button', { name: 'Try again', exact: true }).click();
+  await popup.getByLabel('Type REMOVE to confirm').waitFor();
+  assert.equal(await popup.getByRole('button', { name: 'Remove wallet from this browser' }).isEnabled(), false);
+  assert.ok((await popup.evaluate(() => chrome.storage.local.get('vault'))).vault);
+  await shot(popup, '02b-removal-recovered');
+  await popup.getByRole('button', { name: 'Back', exact: true }).click();
+  await popup.getByRole('button', { name: 'Back', exact: true }).click();
+  await popup.locator('.balance .amount').waitFor({ timeout: 60000 });
+  step('wallet removal remains disabled after a prerequisite failure and retry refreshes the warnings');
 
   // The header's network picker opens a bottom sheet; mainnet stays disabled until pinned.
   await popup.getByRole('button', { name: /^Viewing Local validator/ }).click();
@@ -528,8 +583,15 @@ try {
   await popup.locator('.balance .amount').waitFor({ timeout: 60000 });
   step('lock clears access; a wrong passphrase is refused; the right one unlocks');
 
-  // 9. Backup download, from Home's reminder; once saved, the reminder is gone.
+  // 9. A cancelled download never counts as a saved backup.
   await popup.getByText('Back up your wallet').waitFor({ timeout: 30000 });
+  await popup.getByRole('button', { name: 'Back up now' }).click();
+  const cancelledPromise = popup.waitForEvent('download');
+  await popup.getByRole('button', { name: 'Download backup' }).click();
+  await (await cancelledPromise).cancel();
+  await popup.getByRole('button', { name: 'Back', exact: true }).click();
+  await popup.getByText('Back up your wallet').waitFor({ timeout: 30000 });
+  step('a cancelled backup download leaves the Home reminder in place');
   await popup.getByRole('button', { name: 'Back up now' }).click();
   const downloadPromise = popup.waitForEvent('download');
   await popup.getByRole('button', { name: 'Download backup' }).click();
@@ -541,6 +603,9 @@ try {
   assert.equal(backup.owner.format, 'quantum-seal/keystore/1');
   assert.ok(backup.descriptors.localnet.some((d) => d.wallet === walletAddress.toBase58()));
   assert.ok(!JSON.stringify(backup).includes('"secretKey"'));
+  await shot(popup, '07b-backup-confirm');
+  await popup.getByRole('button', { name: 'I saved my backup file', exact: true }).click();
+  await popup.getByText('Backup saved.', { exact: false }).waitFor();
   await popup.getByRole('button', { name: 'Back', exact: true }).click();
   await popup.locator('.balance .amount').waitFor({ timeout: 60000 });
   assert.equal(await popup.getByText('Back up your wallet').count(), 0);

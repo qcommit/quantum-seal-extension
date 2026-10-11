@@ -58,7 +58,7 @@ export function createVaultStore(storage) {
         ownerPublicKey: vault.owner.publicKey,
         feePayer: vault.feePayer,
         descriptors: descriptorLists(vault.descriptors),
-        // A backup was downloaded, or the wallet was restored from one.
+        // A saved backup was acknowledged, or the wallet was restored from one.
         backedUp: Boolean(vault.backedUpAt),
       };
     },
@@ -236,12 +236,22 @@ export function createVaultStore(storage) {
         await storage.local.remove(VAULT_KEY);
       });
     },
-    // Called once the backup file has been handed to the browser to save. One backup
+    // Called once the user confirms the exported backup was saved. One backup
     // covers every wallet address: they are re-derived from the owner key on restore.
-    async markBackedUp() {
+    async markBackedUp(backup) {
       return withLock('vault', async () => {
         const vault = await read();
         if (!vault) throw new Error('No wallet in this browser profile.');
+        if (!backup || backup.format !== BACKUP_FORMAT)
+          throw new Error('Download your backup file before confirming it was saved.');
+        // Another page may have replaced the wallet or changed its passphrase while
+        // the download was open. Public key equality alone cannot detect re-encryption.
+        if (
+          backup.feePayer !== vault.feePayer ||
+          JSON.stringify(backup.owner) !== JSON.stringify(vault.owner) ||
+          JSON.stringify(backup.fee) !== JSON.stringify(vault.fee)
+        )
+          throw new Error('The wallet or passphrase changed. Download a new backup file before confirming it was saved.');
         if (!vault.backedUpAt) await storage.local.set({ [VAULT_KEY]: { ...vault, backedUpAt: new Date().toISOString() } });
       });
     },
