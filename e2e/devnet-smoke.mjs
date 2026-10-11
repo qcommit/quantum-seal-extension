@@ -77,7 +77,19 @@ try {
   mkdirSync(join(root, 'evidence'), { recursive: true });
   writeFileSync(
     join(root, 'evidence/devnet-smoke.json'),
-    JSON.stringify({ status: 'passed', finishedAt: new Date().toISOString(), cluster: 'devnet', recipient: recipient.toBase58(), seconds }, null, 2) + '\n',
+    JSON.stringify(
+      {
+        status: 'passed',
+        finishedAt: new Date().toISOString(),
+        cluster: 'devnet',
+        recipient: recipient.toBase58(),
+        seconds,
+        // Which build ran: release (what the store ships) or development.
+        build: (({ release, core }) => ({ release, core: core.commit }))(JSON.parse(readFileSync(join(dist, 'build-info.json'), 'utf8'))),
+      },
+      null,
+      2,
+    ) + '\n',
   );
 } catch (error) {
   console.error(error);
