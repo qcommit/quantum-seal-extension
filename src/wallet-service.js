@@ -1102,13 +1102,25 @@ export function createWalletService({
       await withLock('journal-create', async () => {
         // Freeze review creation while taking every send's lock. Existing sends still use
         // their own locks; a running one refuses removal immediately instead of waiting.
-        const ids = (await allSends()).map((r) => r.id);
+        // Only sends that a page could still be running or rewriting need their lock;
+        // finished ones are inert (execute returns them as they are, nothing reclaims them).
+        const ids = (await allSends())
+          .filter((r) => !FINISHED.includes(r.status) || needsReclaim(r) || mayStillExecute(r))
+          .map((r) => r.id);
+        // One nested lock per send; the await keeps the stack flat however many there are.
         const holdingAll = (rest, fn) =>
           rest.length
-            ? withLock(`send:${rest[0]}`, () => holdingAll(rest.slice(1), fn), {
-                ifAvailable: true,
-                busyMessage: 'A send is running in another window. Let it finish or close that window, then try again.',
-              })
+            ? withLock(
+                `send:${rest[0]}`,
+                async () => {
+                  await null;
+                  return holdingAll(rest.slice(1), fn);
+                },
+                {
+                  ifAvailable: true,
+                  busyMessage: 'A send is running in another window. Let it finish or close that window, then try again.',
+                },
+              )
             : fn();
         await holdingAll(ids, async () => {
           // A review could have finished signing between the first check and acquiring its

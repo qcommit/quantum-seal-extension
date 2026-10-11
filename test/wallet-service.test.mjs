@@ -806,3 +806,14 @@ test('overview lists Token-2022 balances marked as not sendable, and skips empty
     [extended, '7', true],
   ]);
 });
+
+test('removing the wallet holds the lock of every open send without exhausting the stack', async () => {
+  const t = await setup();
+  const open = {};
+  for (let i = 0; i < 300; i++)
+    open[`send:open${i}`] = { id: `open${i}`, status: 'review', createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(), records: [] };
+  await t.storage.local.set(open);
+  await t.service.removeWallet();
+  assert.equal(await t.vault.exists(), false);
+  assert.deepEqual(Object.keys(t.storage.local.dump()), ['settings']);
+});

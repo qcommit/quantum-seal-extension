@@ -1,6 +1,6 @@
 {
   "status": "passed",
-  "finishedAt": "2026-10-11T20:33:10.078Z",
+  "finishedAt": "2026-10-11T20:51:50.872Z",
   "cluster": "localnet",
   "steps": [
     "a disposable wallet is created and set up on the local validator",
