@@ -468,7 +468,7 @@ try {
   await shot(popup, '08-locked');
   await popup.getByPlaceholder('Passphrase').fill('wrong passphrase!!');
   await popup.getByRole('button', { name: 'Unlock' }).click();
-  await popup.getByText('Unable to unlock keystore.').waitFor({ timeout: 30000 });
+  await popup.getByText('Wrong passphrase. Check it and try again.').waitFor({ timeout: 30000 });
   await popup.getByPlaceholder('Passphrase').fill(PASS);
   await popup.getByRole('button', { name: 'Unlock' }).click();
   await popup.locator('.balance .amount').waitFor({ timeout: 60000 });

@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { BUILT_IN, deploymentFor, isAvailable, networkConfig } from '../networks.js';
 import { vault, getSettings, saveSettings, touch } from './common.js';
-import { ActionNotice, Field, Loading, useAction, useLoad } from './components.jsx';
+import { ActionButton, ActionNotice, Field, Loading, useAction, useLoad } from './components.jsx';
 import { ArrowLeft, ChevronRight, Code, Download, Key, Lock } from './icons.jsx';
 
 const PIN_FIELDS = [
@@ -120,9 +120,9 @@ function SettingsForm({ initial, onBack, onBackup, onLock }) {
 
       <div className="save-row">
         <ActionNotice notice={notice} />
-        <button type="button" className="primary full" disabled={busy} onClick={save}>
+        <ActionButton busy={busy} onClick={save}>
           Save
-        </button>
+        </ActionButton>
       </div>
 
       <h2 className="settings-label">Wallet</h2>
@@ -146,7 +146,9 @@ function SettingsForm({ initial, onBack, onBackup, onLock }) {
       </div>
 
       <p className="about">
-        Quantum Seal {version} · Not independently audited.
+        Quantum Seal {version} · transfers approved with SLH-DSA (FIPS 205)
+        <br />
+        Not independently audited.
       </p>
     </>
   );
@@ -176,18 +178,19 @@ export function BackupPage({ onBack }) {
         </button>
         <h1>Backup</h1>
       </div>
-      <div className="setting-panel prose">
-        <p>
-          The backup file holds your keys encrypted with your passphrase, plus your public wallet addresses. Keep it
-          somewhere safe: anyone with the file and the passphrase controls the wallet.
-        </p>
-        <p className="field-hint">The owner key inside also opens with the Quantum Seal command line.</p>
+      <div className="backup-page">
+        <div className="setting-panel prose">
+          <p>
+            The backup file holds your keys, encrypted with your passphrase, and your public wallet addresses. Keep it
+            somewhere safe: anyone with the file and the passphrase controls the wallet.
+          </p>
+          <p className="field-hint">The owner key inside also opens with the Quantum Seal command line.</p>
+        </div>
+        <ActionButton busy={busy} icon={<Download size={16} />} onClick={download}>
+          Download backup
+        </ActionButton>
+        <ActionNotice notice={notice} />
       </div>
-      <button type="button" className="primary full" disabled={busy} onClick={download}>
-        <Download size={16} />
-        <span>Download backup</span>
-      </button>
-      <ActionNotice notice={notice} />
     </>
   );
 }

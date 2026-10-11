@@ -2,8 +2,8 @@
 // after use, so passphrases never sit in React state or in a DOM value attribute.
 import { useRef, useState } from 'react';
 import { vault } from './common.js';
-import { ActionNotice, Mark, useAction } from './components.jsx';
-import { Shield, Upload } from './icons.jsx';
+import { ActionButton, ActionNotice, Mark, useAction } from './components.jsx';
+import { Check, Shield, Upload } from './icons.jsx';
 
 const MIN_PASSPHRASE = 12;
 
@@ -20,13 +20,35 @@ export function Welcome({ onDone }) {
             Your keys are created and encrypted on this device. Transfers are approved with SLH-DSA (FIPS 205).
           </p>
         </div>
-        <div className="segmented" role="tablist" aria-label="Get started">
-          <button type="button" role="tab" aria-selected={mode === 'create'} onClick={() => setMode('create')}>
-            New wallet
-          </button>
-          <button type="button" role="tab" aria-selected={mode === 'restore'} onClick={() => setMode('restore')}>
-            From backup
-          </button>
+        {/* Tabs: arrow keys move between them; only the selected one is in the tab order. */}
+        <div
+          className="segmented"
+          role="tablist"
+          aria-label="Get started"
+          onKeyDown={(e) => {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            const next = mode === 'create' ? 'restore' : 'create';
+            setMode(next);
+            e.currentTarget.querySelector(`#tab-${next}`)?.focus();
+          }}
+        >
+          {[
+            ['create', 'New wallet'],
+            ['restore', 'From backup'],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              id={`tab-${id}`}
+              aria-controls="welcome-panel"
+              aria-selected={mode === id}
+              tabIndex={mode === id ? 0 : -1}
+              onClick={() => setMode(id)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
         {mode === 'create' ? <CreateForm onDone={onDone} /> : <RestoreForm onDone={onDone} />}
       </main>
@@ -48,9 +70,9 @@ function CreateForm({ onDone }) {
       pass.current.value = '';
       confirm.current.value = '';
       onDone();
-    }, 'Creating keys…');
+    });
   return (
-    <div className="form-stack" role="tabpanel">
+    <div className="form-stack" role="tabpanel" id="welcome-panel" aria-labelledby="tab-create">
       <input
         ref={pass}
         className="text-input"
@@ -73,9 +95,9 @@ function CreateForm({ onDone }) {
         <Shield size={14} />
         <span>The passphrase encrypts your keys here. Nobody can recover it for you.</span>
       </p>
-      <button type="button" className="primary full" disabled={busy} onClick={create}>
+      <ActionButton busy={busy} onClick={create}>
         Create wallet
-      </button>
+      </ActionButton>
       <ActionNotice notice={notice} />
     </div>
   );
@@ -93,11 +115,11 @@ function RestoreForm({ onDone }) {
       await vault.importBackup(await f.text(), pass.current.value);
       pass.current.value = '';
       onDone();
-    }, 'Unlocking backup…');
+    });
   return (
-    <div className="form-stack" role="tabpanel">
-      <label className="import-button secondary">
-        <Upload size={16} />
+    <div className="form-stack" role="tabpanel" id="welcome-panel" aria-labelledby="tab-restore">
+      <label className={`import-button secondary${fileName ? ' chosen' : ''}`}>
+        {fileName ? <Check size={16} /> : <Upload size={16} />}
         <span>{fileName || 'Choose backup file'}</span>
         <input
           ref={file}
@@ -118,11 +140,11 @@ function RestoreForm({ onDone }) {
       />
       <p className="hint">
         <Shield size={14} />
-        <span>Restores the encrypted keys and your wallet addresses from a Quantum Seal backup.</span>
+        <span>Restores your encrypted keys and wallet addresses from a Quantum Seal backup file.</span>
       </p>
-      <button type="button" className="primary full" disabled={busy} onClick={restore}>
-        Restore
-      </button>
+      <ActionButton busy={busy} onClick={restore}>
+        Restore wallet
+      </ActionButton>
       <ActionNotice notice={notice} />
     </div>
   );
@@ -137,11 +159,14 @@ export function Unlock({ onDone }) {
         await vault.unlock(pass.current.value);
       } catch (error) {
         pass.current.select();
+        // The vault reports any failed decryption this way; for a person it means the passphrase.
+        if (error?.message === 'Unable to unlock keystore.')
+          throw new Error('Wrong passphrase. Check it and try again.');
         throw error;
       }
       pass.current.value = '';
       onDone();
-    }, 'Unlocking…');
+    });
   return (
     <div className="gate">
       <main className="gate-body gate-center">
@@ -161,13 +186,13 @@ export function Unlock({ onDone }) {
             autoFocus
             onKeyDown={(e) => e.key === 'Enter' && unlock()}
           />
-          <button type="button" className="primary full" disabled={busy} onClick={unlock}>
+          <ActionButton busy={busy} onClick={unlock}>
             Unlock
-          </button>
+          </ActionButton>
           <ActionNotice notice={notice} />
         </div>
       </main>
-      <p className="gate-foot">Locks itself after a period of inactivity.</p>
+      <footer className="gate-foot">Quantum Seal locks itself after a period of inactivity.</footer>
     </div>
   );
 }

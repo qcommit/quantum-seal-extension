@@ -1,7 +1,7 @@
 // Send: pick an asset, enter recipient and amount, then review in a separate window.
 import { useState } from 'react';
 import { service, lamportsToSol, short, errorText, openReview } from './common.js';
-import { ActionNotice, Field, Loading, Notice, Sheet, useAction, useLoad } from './components.jsx';
+import { ActionButton, ActionNotice, Field, Loading, Notice, Sheet, useAction, useLoad } from './components.jsx';
 import { ArrowLeft, Check, ChevronDown, Shield } from './icons.jsx';
 
 export function SendPage({ onBack }) {
@@ -10,13 +10,32 @@ export function SendPage({ onBack }) {
   const [picking, setPicking] = useState(false);
   const [to, setTo] = useState('');
   const [amount, setAmount] = useState('');
-  const { busy, notice, run } = useAction();
+  const { busy, notice, setNotice, run } = useAction();
+  // An error about the old input goes away as soon as the input changes.
+  const edit = (set) => (value) => {
+    set(value);
+    if (notice?.kind === 'error') setNotice(null);
+  };
   const o = overview.data;
 
+  // max: the most this send can move (for SOL, what is left after the fee refill).
   const assets = o
     ? [
-        { id: 'SOL', name: 'SOL', sub: 'Solana', balance: `${lamportsToSol(o.availableLamports)} SOL` },
-        ...o.tokens.map((t) => ({ id: t.mint, name: short(t.mint, 5), sub: 'SPL token', balance: t.uiAmount, mint: t.mint })),
+        {
+          id: 'SOL',
+          name: 'SOL',
+          sub: 'Solana',
+          balance: `${lamportsToSol(o.availableLamports)} SOL`,
+          max: o.maxSendableLamports > 0n ? lamportsToSol(o.maxSendableLamports) : null,
+        },
+        ...o.tokens.map((t) => ({
+          id: t.mint,
+          name: short(t.mint, 5),
+          sub: 'SPL token',
+          balance: t.uiAmount,
+          max: t.amount !== '0' ? t.uiAmount : null,
+          mint: t.mint,
+        })),
       ]
     : [];
   const selected = assets.find((a) => a.id === asset) ?? assets[0];
@@ -31,7 +50,7 @@ export function SendPage({ onBack }) {
       });
       await openReview(record.id);
       return 'Review window opened. Check the details there before you approve.';
-    }, 'Preparing the transfer…');
+    });
 
   return (
     <>
@@ -61,41 +80,56 @@ export function SendPage({ onBack }) {
                 <strong>{selected.name}</strong>
                 <small>{selected.sub}</small>
               </span>
-              <span className="token-value">
-                <strong>{selected.balance}</strong>
-              </span>
               <ChevronDown size={16} />
             </button>
           </div>
           <Field label="To">
             <input
               value={to}
-              onChange={(e) => setTo(e.target.value)}
+              onChange={(e) => edit(setTo)(e.target.value)}
               placeholder="Recipient address"
               spellCheck="false"
               autoComplete="off"
             />
           </Field>
-          <Field label="Amount" unit={asset === 'SOL' ? 'SOL' : 'tokens'} className="large">
+          <Field
+            label="Amount"
+            unit={asset === 'SOL' ? 'SOL' : 'tokens'}
+            className="large"
+            aside={
+              <>
+                <span className="available">
+                  Available&nbsp;<strong>{selected.balance}</strong>
+                </span>
+                {selected.max ? (
+                  <button
+                    type="button"
+                    className="max-button"
+                    aria-label={`Use the maximum: ${selected.max}`}
+                    onClick={() => edit(setAmount)(selected.max)}
+                  >
+                    Max
+                  </button>
+                ) : null}
+              </>
+            }
+          >
             <input
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => edit(setAmount)(e.target.value)}
               placeholder="Amount"
               inputMode="decimal"
               autoComplete="off"
             />
           </Field>
-          <p className="available">
-            Available <strong>{selected.balance}</strong>
-          </p>
+          <ActionNotice notice={notice} />
+          <ActionButton busy={busy} onClick={review}>
+            Review
+          </ActionButton>
           <p className="hint">
             <Shield size={14} />
-            <span>You will see the exact transfer in a separate window before anything is signed.</span>
+            <span>A separate window shows the exact transfer before anything is signed.</span>
           </p>
-          <button type="button" className="primary full" disabled={busy} onClick={review}>
-            Review
-          </button>
-          <ActionNotice notice={notice} />
         </div>
       ) : null}
       <Sheet open={picking} onClose={() => setPicking(false)} title="Choose asset">
@@ -108,7 +142,7 @@ export function SendPage({ onBack }) {
               className={`wallet-row${a.id === asset ? ' selected' : ''}`}
               aria-pressed={a.id === asset}
               onClick={() => {
-                setAsset(a.id);
+                edit(setAsset)(a.id);
                 setPicking(false);
               }}
             >

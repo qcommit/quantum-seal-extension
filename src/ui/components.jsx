@@ -32,6 +32,12 @@ export function useAction() {
   const running = useRef(false);
   const mounted = useRef(true);
   useEffect(() => () => void (mounted.current = false), []);
+  // A success message fades out after a while, so it never lingers next to later states.
+  useEffect(() => {
+    if (notice?.kind !== 'ok') return undefined;
+    const t = setTimeout(() => setNotice((n) => (n === notice ? null : n)), 6000);
+    return () => clearTimeout(t);
+  }, [notice]);
   const run = useCallback(async (fn, pending) => {
     if (running.current) return;
     running.current = true;
@@ -60,8 +66,44 @@ export function Notice({ kind = 'info', children, icon = kind === 'error' || kin
     </p>
   );
 }
+// The outcome of something the user just did. It scrolls into view when it appears, so
+// an error under the fold is never missed.
 export function ActionNotice({ notice }) {
-  return notice ? <Notice kind={notice.kind}>{notice.text}</Notice> : null;
+  const ref = useRef(null);
+  useEffect(() => {
+    ref.current?.firstElementChild?.scrollIntoView?.({ block: 'nearest' });
+  }, [notice]);
+  return notice ? (
+    <div ref={ref} className="notice-anchor">
+      <Notice kind={notice.kind}>{notice.text}</Notice>
+    </div>
+  ) : null;
+}
+
+// A button that shows a spinner while its action runs, without changing its size or name.
+export function ActionButton({ busy = false, icon = null, disabled, className = 'primary full', children, ...rest }) {
+  return (
+    <button type="button" className={className} disabled={busy || disabled} aria-busy={busy || undefined} {...rest}>
+      {busy ? <span className="btn-spinner" aria-hidden="true" /> : icon}
+      <span>{children}</span>
+    </button>
+  );
+}
+
+// Empty state: an icon, a short title and one helpful line.
+export function Empty({ icon, title, children, level = 3, tone = '', compact = false }) {
+  const H = `h${level}`;
+  return (
+    <div className={`empty${compact ? ' compact' : ''}`}>
+      <span className={`empty-icon ${tone}`} aria-hidden="true">
+        {icon}
+      </span>
+      <div>
+        <H>{title}</H>
+        {children}
+      </div>
+    </div>
+  );
 }
 
 // The Quantum Seal mark in a round avatar. Sizes come from CSS classes (the extension's
@@ -106,6 +148,7 @@ export function QrCode({ text, cell = 4 }) {
 }
 
 export function CopyButton({ text, label = 'Copy address', className = 'secondary' }) {
+  const [failed, setFailed] = useState(false);
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return undefined;
@@ -119,14 +162,16 @@ export function CopyButton({ text, label = 'Copy address', className = 'secondar
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text);
+          setFailed(false);
           setCopied(true);
         } catch {
-          /* clipboard unavailable; the address stays visible for manual copy */
+          // Clipboard unavailable; the address stays visible for manual copy.
+          setFailed(true);
         }
       }}
     >
       {copied ? <Check size={16} /> : <Copy size={16} />}
-      <span>{copied ? 'Copied' : label}</span>
+      <span aria-live="polite">{copied ? 'Copied' : failed ? 'Copy failed: select the address' : label}</span>
     </button>
   );
 }
@@ -167,14 +212,25 @@ export function Sheet({ open, onClose, title, children }) {
 }
 
 // A labelled input. The label names only the input (hint and unit stay outside it).
-export function Field({ label, hint, unit, children, className = '' }) {
+// `aside` sits on the label's row, right-aligned (e.g. the available balance).
+export function Field({ label, hint, unit, aside, children, className = '' }) {
   const id = useId();
   const hintId = `${id}-hint`;
+  const labelEl = (
+    <label className="field-label" htmlFor={id}>
+      {label}
+    </label>
+  );
   return (
     <div className={`field ${className}`}>
-      <label className="field-label" htmlFor={id}>
-        {label}
-      </label>
+      {aside ? (
+        <div className="field-top">
+          {labelEl}
+          <div className="field-aside">{aside}</div>
+        </div>
+      ) : (
+        labelEl
+      )}
       <span className="input-unit">
         {cloneElement(children, { id, 'aria-describedby': hint ? hintId : undefined })}
         {unit ? <b aria-hidden="true">{unit}</b> : null}
@@ -189,21 +245,34 @@ export function Field({ label, hint, unit, children, className = '' }) {
 }
 
 // Persistent strip on every non-mainnet screen: addresses and SOL there are test-only.
+// Screens that show an address to fund repeat the warning next to it.
 export function TestNetworkBanner({ cluster, label }) {
   if (!cluster || cluster === 'mainnet-beta') return null;
   return (
-    <p className={`test-banner net-${cluster}`} role="note">
+    <aside className={`test-banner net-${cluster}`} aria-label="Test network">
       <Alert size={13} />
       <span>
-        <strong>Test network · {label}.</strong> Test SOL only. Never send real (mainnet) SOL to these addresses.
+        <strong>Test network · {label}</strong> · test SOL only, never real SOL
       </span>
+    </aside>
+  );
+}
+
+// Under an address on a test network: real SOL sent there is lost.
+export function TestAddressCaption({ cluster }) {
+  if (!cluster || cluster === 'mainnet-beta') return null;
+  return (
+    <p className="address-caption">
+      <Alert size={13} />
+      <span>Test SOL only: real SOL sent here is lost.</span>
     </p>
   );
 }
 
+// A label and value. Addresses (mono) are shown in full under their label, never cut.
 export function KeyValue({ label, children, mono = false }) {
   return (
-    <div className="kv">
+    <div className={`kv${mono ? ' stack' : ''}`}>
       <span>{label}</span>
       {mono ? <code>{children}</code> : <b>{children}</b>}
     </div>

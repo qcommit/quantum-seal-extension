@@ -14,7 +14,17 @@ import {
   errorText,
   SETTINGS_KEY,
 } from './common.js';
-import { CopyButton, Loading, Mark, Notice, QrCode, Sheet, TestNetworkBanner, useLoad } from './components.jsx';
+import {
+  CopyButton,
+  Loading,
+  Mark,
+  Notice,
+  QrCode,
+  Sheet,
+  TestAddressCaption,
+  TestNetworkBanner,
+  useLoad,
+} from './components.jsx';
 import { Check, ChevronDown, Gear, Globe, History, Home, Lock } from './icons.jsx';
 import { Welcome, Unlock } from './onboarding.jsx';
 import { HomeTab, ActivityTab } from './home.jsx';
@@ -84,7 +94,12 @@ function Wallet({ onLock }) {
       .then(({ reclaimed }) => reclaimed && setReloadKey((k) => k + 1))
       .catch(() => {});
   }, [cluster]);
-  if (!settings.data) return <Loading label="Loading settings" />;
+  if (!settings.data)
+    return (
+      <div className="gate">
+        <Loading label="Loading settings" />
+      </div>
+    );
 
   const { settings: s, available } = settings.data;
   const deployment = deploymentFor(s);
@@ -206,9 +221,7 @@ function NetworkList({ current, available, onPick }) {
   };
   return (
     <>
-      <p className="sheet-copy">
-        Choose which Solana network this wallet shows and sends on. Each network has its own wallet address.
-      </p>
+      <p className="sheet-copy">The network this wallet shows and sends on. Each network has its own wallet address.</p>
       <div className="wallet-list">
         {Object.entries(BUILT_IN).map(([id, n]) => {
           // Only mainnet is locked until the release pins it; test networks can be configured.
@@ -245,15 +258,13 @@ function Receive({ label, cluster }) {
   return (
     <div className="receive">
       <p className="sheet-copy">
-        Send SOL or classic SPL tokens (not Token-2022) on <strong>{label}</strong> to this address. It is derived from
-        your key, so your backup always recovers it.
+        Your wallet address on <strong>{label}</strong>, for SOL and classic SPL tokens (not Token-2022). Your backup
+        always recovers it.
       </p>
-      {cluster !== 'mainnet-beta' ? (
-        <Notice kind="warn">This is a {label} address: test SOL only. Real SOL sent here is lost.</Notice>
-      ) : null}
       <div className="address-card">
         <QrCode text={d.data.wallet} />
         <code className="address">{d.data.wallet}</code>
+        <TestAddressCaption cluster={cluster} />
         <CopyButton text={d.data.wallet} />
       </div>
     </div>

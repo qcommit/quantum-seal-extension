@@ -50,11 +50,13 @@ export function onSendsChange(fn) {
 export function short(address, n = 4) {
   return address ? `${address.slice(0, n)}…${address.slice(-n)}` : '';
 }
-// Rounds a SOL amount for display only (never for signing): at most `digits` decimals.
+// Rounds a SOL amount down for display only (never for signing): at most `digits`
+// decimals, but never down to "0" for a non-zero amount (0.00004 stays 0.00004).
 export function solDisplay(lamports, digits = 4) {
   const full = lamportsToSol(lamports);
   const [whole, frac = ''] = full.split('.');
-  const cut = frac.slice(0, digits).replace(/0+$/, '');
+  let cut = frac.slice(0, digits).replace(/0+$/, '');
+  if (!cut && whole === '0' && frac) cut = frac.slice(0, frac.search(/[1-9]/) + 1);
   return cut ? `${whole}.${cut}` : whole;
 }
 export async function openReview(id) {

@@ -11,12 +11,25 @@ import {
   openReview,
   onSendsChange,
 } from './common.js';
-import { ActionNotice, CopyButton, Loading, Notice, QrCode, useAction, useLoad } from './components.jsx';
+import {
+  ActionButton,
+  ActionNotice,
+  CopyButton,
+  Empty,
+  Loading,
+  Notice,
+  QrCode,
+  TestAddressCaption,
+  useAction,
+  useLoad,
+} from './components.jsx';
 import {
   Alert,
   ArrowDown,
   ArrowUp,
   ChevronRight,
+  Clock,
+  Close,
   Coins,
   Copy,
   Check,
@@ -24,7 +37,6 @@ import {
   Inbox,
   Refresh,
   SendArrow,
-  Shield,
 } from './icons.jsx';
 
 // Setup keeps a fee float on the setup address; anything above it moves into the wallet.
@@ -50,21 +62,25 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
     return () => clearInterval(t);
   }, [initialized, setup.busy]);
 
-  if (!o && overview.loading) return <Loading label="Loading balance" />;
+  if (!o && overview.loading) return <HomeSkeleton />;
   if (!o)
     return (
-      <div className="empty">
-        <span className="empty-icon warn">
+      <div className="empty load-error">
+        <span className="empty-icon warn" aria-hidden="true">
           <Alert size={22} />
         </span>
-        <h3>Could not load this network</h3>
+        <h1 className="empty-title">Could not load this network</h1>
         <Notice kind="error">{errorText(overview.error)}</Notice>
-        <p>Choose an available network or check the RPC endpoint in Settings.</p>
+        <p>Try again, pick another network from the header, or check the RPC endpoint in Settings.</p>
         <div className="row-actions">
-          <button type="button" className="secondary" onClick={() => setPoll((p) => p + 1)}>
-            <Refresh size={16} />
-            <span>Try again</span>
-          </button>
+          <ActionButton
+            className="secondary"
+            busy={overview.loading}
+            icon={<Refresh size={16} />}
+            onClick={() => setPoll((p) => p + 1)}
+          >
+            Try again
+          </ActionButton>
           <button type="button" className="secondary" onClick={onSettings}>
             Settings
           </button>
@@ -83,6 +99,7 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
     );
 
   const lowFees = o.feeLamports < o.feeNeededLamports;
+  const swept = o.sweepableLamports > 0n;
   return (
     <>
       <section className="balance-hero balance" aria-label="Balance">
@@ -93,7 +110,6 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
         </h1>
         <WalletChip address={o.wallet} />
       </section>
-      {overview.error ? <Notice kind="error">{errorText(overview.error)}</Notice> : null}
 
       <div className="actions">
         <button type="button" className="action" onClick={onReceive}>
@@ -106,122 +122,111 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
         </button>
       </div>
 
-      {o.sweepableLamports > 0n ? (
-        <div className="fee-card low" role="status">
-          <div className="fee-card-top">
-            <span className="fee-icon">
-              <Fuel size={18} />
-            </span>
-            <p>
-              {solDisplay(o.sweepableLamports, 6)} SOL is waiting on your fee address
-              <span>
-                Fees need only {solDisplay(FEE_FLOAT_LAMPORTS, 3)} SOL there. Move the rest into your wallet.
+      <div className="home-status">
+        {overview.error ? <Notice kind="error">{errorText(overview.error)}</Notice> : null}
+        {lowFees ? (
+          <div className="fee-card" role="status">
+            <div className="fee-card-top">
+              <span className="fee-icon" aria-hidden="true">
+                <Fuel size={18} />
               </span>
-            </p>
+              <p>
+                Add SOL to your fee address to send
+                <span>
+                  It holds {solDisplay(o.feeLamports, 6)} SOL; a send needs about {solDisplay(o.feeNeededLamports, 3)} SOL
+                  there. Send SOL to it from any wallet or exchange.
+                </span>
+              </p>
+            </div>
+            <code className="address">{o.feePayer}</code>
+            <CopyButton text={o.feePayer} label="Copy fee address" />
+            <TestAddressCaption cluster={o.cluster} />
           </div>
-          <button
-            type="button"
-            className="secondary"
-            disabled={sweep.busy}
-            onClick={() =>
-              sweep.run(async () => {
-                await service.sweepExcess();
-                setPoll((p) => p + 1);
-                return 'Moved into your wallet.';
-              }, 'Moving SOL into your wallet…')
-            }
-          >
-            Move to wallet
-          </button>
-        </div>
-      ) : null}
-      {/* Outside the card: it disappears once the SOL has moved. */}
-      <ActionNotice notice={sweep.notice} />
-      {o.otherWallets?.length ? (
-        <Notice kind="warn">
-          An earlier {o.label} wallet of yours still holds{' '}
-          {o.otherWallets.map((w) => `${solDisplay(w.lamports)} SOL at ${short(w.wallet, 5)}`).join(', ')}. It belongs to a
-          previous deployment of the wallet program; to move it, use a build pinned to that deployment (program{' '}
-          {short(o.otherWallets[0].program, 5)}).
-        </Notice>
-      ) : null}
-
-      {lowFees ? (
-        <div className="fee-card low" role="status">
-          <div className="fee-card-top">
-            <span className="fee-icon">
-              <Fuel size={18} />
-            </span>
-            <p>
-              Fee key is low: {solDisplay(o.feeLamports, 6)} SOL
-              <span>
-                Send a little SOL (about {solDisplay(o.feeNeededLamports, 3)} SOL) to your fee key so transfers can
-                start.
+        ) : o.topUpLamports > 0n ? (
+          <div className="fee-card" role="status">
+            <div className="fee-card-top">
+              <span className="fee-icon" aria-hidden="true">
+                <Fuel size={18} />
               </span>
-            </p>
+              <p>
+                Fee address is running low
+                <span>
+                  {solDisplay(o.feeLamports, 6)} SOL left of {solDisplay(FEE_FLOAT_LAMPORTS, 3)} SOL. Move{' '}
+                  {solDisplay(o.topUpLamports, 6)} SOL from your wallet; you review it like any send.
+                </span>
+              </p>
+            </div>
+            <ActionButton
+              className="secondary"
+              busy={topUp.busy}
+              onClick={() =>
+                topUp.run(async () => {
+                  const record = await service.topUpFeeKey();
+                  await openReview(record.id);
+                  return 'Review window opened.';
+                })
+              }
+            >
+              Top up from wallet
+            </ActionButton>
           </div>
-          <code className="mono">{o.feePayer}</code>
-          <CopyButton text={o.feePayer} label="Copy fee-key address" />
-        </div>
-      ) : o.topUpLamports > 0n ? (
-        <div className="fee-card low" role="status">
-          <div className="fee-card-top">
-            <span className="fee-icon">
-              <Fuel size={18} />
+        ) : swept ? null : (
+          <p className="status-line">
+            <Fuel size={16} />
+            <span className="status-text">
+              <b>Fees ready</b> · {solDisplay(o.feeLamports)} SOL on your fee address
             </span>
-            <p>
-              Fee key below its {solDisplay(FEE_FLOAT_LAMPORTS, 3)} SOL float
-              <span>
-                {solDisplay(o.feeLamports, 6)} SOL left. Refill {solDisplay(o.topUpLamports, 6)} SOL from your wallet with a
-                sealed transfer you review first.
-              </span>
-            </p>
-          </div>
-          <button
-            type="button"
-            className="secondary"
-            disabled={topUp.busy}
-            onClick={() =>
-              topUp.run(async () => {
-                const record = await service.topUpFeeKey();
-                await openReview(record.id);
-                return 'Review window opened.';
-              }, 'Preparing the top-up…')
-            }
-          >
-            Top up from wallet
-          </button>
-        </div>
-      ) : (
-        <div className="fee-card ok">
-          <span className="fee-icon">
-            <Fuel size={18} />
-          </span>
-          <p>
-            Fee key topped up
-            <span>{solDisplay(o.feeLamports)} SOL · refilled by each send</span>
+            <span className="status-dot" aria-hidden="true" />
           </p>
-          <span className="status-dot" aria-hidden="true" />
-        </div>
-      )}
-      <ActionNotice notice={topUp.notice} />
+        )}
+        <ActionNotice notice={topUp.notice} />
 
-      <div className="assurance">
-        <Shield size={20} />
-        <p>
-          Post-quantum signatures
-          <span>Every transfer is approved with SLH-DSA (FIPS 205) and checked on-chain.</span>
-        </p>
+        {swept ? (
+          <div className="fee-card" role="status">
+            <div className="fee-card-top">
+              <span className="fee-icon" aria-hidden="true">
+                <Fuel size={18} />
+              </span>
+              <p>
+                {solDisplay(o.sweepableLamports, 6)} SOL is waiting on your fee address
+                <span>Fees need only {solDisplay(FEE_FLOAT_LAMPORTS, 3)} SOL there. Move the rest into your wallet.</span>
+              </p>
+            </div>
+            <ActionButton
+              className="secondary"
+              busy={sweep.busy}
+              onClick={() =>
+                sweep.run(async () => {
+                  await service.sweepExcess();
+                  setPoll((p) => p + 1);
+                  return 'Moved into your wallet.';
+                })
+              }
+            >
+              Move to wallet
+            </ActionButton>
+          </div>
+        ) : null}
+        {/* Outside the card: it stays after the card disappears once the SOL has moved. */}
+        <ActionNotice notice={sweep.notice} />
+        {o.otherWallets?.length ? (
+          <Notice kind="warn">
+            An earlier {o.label} wallet of yours still holds{' '}
+            {o.otherWallets.map((w) => `${solDisplay(w.lamports)} SOL at ${short(w.wallet, 5)}`).join(', ')}. It belongs
+            to a previous deployment of the wallet program; to move it, use a build pinned to that deployment (program{' '}
+            {short(o.otherWallets[0].program, 5)}).
+          </Notice>
+        ) : null}
       </div>
 
       <div className="section-heading">
         <h2>Tokens</h2>
-        <span>{o.tokens.length}</span>
+        <span aria-label={`${o.tokens.length} tokens`}>{o.tokens.length}</span>
       </div>
       {o.tokens.length ? (
-        <div className="token-list">
+        <ul className="token-list" aria-label="Tokens">
           {o.tokens.map((t) => (
-            <div className="token-row" key={t.account}>
+            <li className="token-row" key={t.account}>
               <span className="token-avatar" aria-hidden="true">
                 {t.mint.slice(0, 2)}
               </span>
@@ -230,21 +235,38 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
                 <small>SPL token</small>
               </span>
               <span className="token-value">
-                <strong>{t.uiAmount}</strong>
+                <strong title={t.uiAmount}>{t.uiAmount}</strong>
               </span>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       ) : (
-        <div className="empty">
-          <span className="empty-icon">
-            <Coins size={22} />
-          </span>
-          <h3>No tokens yet</h3>
+        <Empty compact icon={<Coins size={18} />} title="No tokens yet">
           <p>Classic SPL tokens sent to your wallet address show up here.</p>
-        </div>
+        </Empty>
       )}
     </>
+  );
+}
+
+// Same footprint as the loaded balance and actions, so nothing jumps when data arrives.
+function HomeSkeleton() {
+  return (
+    <div className="home-skeleton" role="status">
+      <h1 className="visually-hidden">Loading balance</h1>
+      <div className="balance-hero">
+        <div className="skeleton-hero">
+          <span className="skeleton sk-eyebrow" />
+          <span className="skeleton sk-amount" />
+          <span className="skeleton sk-chip" />
+        </div>
+      </div>
+      <div className="actions" aria-hidden="true">
+        <span className="skeleton action" />
+        <span className="skeleton action" />
+      </div>
+      <span className="skeleton sk-line" />
+    </div>
   );
 }
 
@@ -282,62 +304,73 @@ function Setup({ o, action, refreshing, onRefresh, error }) {
       <div className="page-heading">
         <h1>Set up your wallet</h1>
         <p>
-          Watching <strong>{o.label}</strong>.{' '}
-          Send at least {lamportsToSol(SETUP_MINIMUM_LAMPORTS)} SOL to this setup address. The extension creates your
-          post-quantum wallet, keeps {lamportsToSol(FEE_FLOAT_LAMPORTS)} SOL here for network fees, and moves everything
-          else into the wallet.
+          Send at least {lamportsToSol(SETUP_MINIMUM_LAMPORTS)} SOL to this address on <strong>{o.label}</strong>. It
+          becomes your fee address: {lamportsToSol(FEE_FLOAT_LAMPORTS)} SOL stays here for network fees and the rest
+          moves into your new wallet.
         </p>
       </div>
-      <div className="address-card">
-        <QrCode text={o.feePayer} />
-        <code className="address">{o.feePayer}</code>
-        <CopyButton text={o.feePayer} />
-      </div>
-      <div className="setup-balance">
+      <div className="setup-balance" aria-live="polite">
         <span>
-          Setup address balance
+          Balance at this address
           <strong>{lamportsToSol(o.feeLamports)} SOL</strong>
         </span>
         <span className={`pill ${enough ? 'done' : 'review'}`}>{enough ? 'Ready' : 'Waiting'}</span>
-      </div>
-      {enough ? (
         <button
           type="button"
-          className="primary full"
-          disabled={action.busy}
-          onClick={() =>
-            action.run(async () => {
-              await service.setupWallet();
-              onRefresh();
-            }, 'Creating your wallet on-chain…')
-          }
+          className="icon-button"
+          aria-label="Refresh"
+          title="Refresh"
+          disabled={action.busy || refreshing}
+          onClick={onRefresh}
         >
-          Create my wallet
+          {refreshing ? <span className="btn-spinner" aria-hidden="true" /> : <Refresh size={16} />}
         </button>
-      ) : (
-        <Notice kind="info">Waiting for at least {lamportsToSol(SETUP_MINIMUM_LAMPORTS)} SOL.</Notice>
-      )}
-      <button type="button" className="ghost full" disabled={action.busy || refreshing} onClick={onRefresh}>
-        <Refresh size={15} />
-        <span>Refresh</span>
-      </button>
-      <ActionNotice notice={action.notice} />
+      </div>
       {error ? <Notice kind="error">{errorText(error)}</Notice> : null}
+      {enough ? (
+        <>
+          <ActionButton
+            busy={action.busy}
+            onClick={() =>
+              action.run(async () => {
+                await service.setupWallet();
+                onRefresh();
+              }, 'Creating your wallet on-chain. This takes a few seconds…')
+            }
+          >
+            Create my wallet
+          </ActionButton>
+          <ActionNotice notice={action.notice} />
+        </>
+      ) : null}
+      <div className="address-card">
+        <QrCode text={o.feePayer} />
+        <code className="address">{o.feePayer}</code>
+        <TestAddressCaption cluster={o.cluster} />
+        <CopyButton text={o.feePayer} />
+      </div>
+      {enough ? null : (
+        <p className="hint">
+          <Clock size={14} />
+          <span>Checking for your deposit every few seconds. You can close this window meanwhile.</span>
+        </p>
+      )}
     </div>
   );
 }
 
 const STATUS_LABEL = {
   review: 'In review',
-  signed: 'Signed',
-  submitting: 'Submitting',
-  done: 'Done',
+  signed: 'Approved',
+  submitting: 'Sending',
+  done: 'Sent',
   failed: 'Failed',
   uncertain: 'Uncertain',
   superseded: 'Not sent',
   expired: 'Expired',
   discarded: 'Discarded',
 };
+const STATUS_ICON = { failed: Alert, uncertain: Alert, superseded: Close, expired: Clock, discarded: Close };
 
 export function ActivityTab() {
   const [version, setVersion] = useState(0);
@@ -348,40 +381,40 @@ export function ActivityTab() {
     <>
       <div className="page-heading">
         <h1>Activity</h1>
-        <p>Sends from this browser. Open one to see its details or resume it.</p>
+        <p>Sends from this browser. Open one for details, or to resume it.</p>
       </div>
       {sends.loading && !sends.data ? <Loading label="Loading activity" /> : null}
       {sends.error ? <Notice kind="error">{errorText(sends.error)}</Notice> : null}
       {sends.data && !list.length ? (
-        <div className="empty">
-          <span className="empty-icon">
-            <Inbox size={22} />
-          </span>
-          <h3>No activity yet</h3>
-          <p>Transfers you send from this wallet appear here with their status.</p>
-        </div>
+        <Empty level={2} icon={<Inbox size={22} />} title="No activity yet">
+          <p>Sends from this wallet appear here with their status.</p>
+        </Empty>
       ) : null}
       {list.length ? (
         <ul className="activity-list">
-          {list.map((s) => (
-            <li key={s.id}>
-              <button type="button" className="activity-row" onClick={() => openReview(s.id)}>
-                <span className={`trade-avatar ${s.status}`} aria-hidden="true">
-                  <SendArrow size={18} />
-                </span>
-                <span className="token-name">
-                  <strong>
-                    Send {s.display.amount} {s.display.asset === 'SOL' ? 'SOL' : short(s.display.asset)}
-                  </strong>
-                  <small>
-                    To {short(s.display.to)} · {BUILT_IN[s.cluster]?.label ?? s.cluster} · {when(s.createdAt)}
-                  </small>
-                </span>
-                <span className={`pill ${s.status}`}>{STATUS_LABEL[s.status] ?? s.status}</span>
-                <ChevronRight size={16} className="row-chevron" />
-              </button>
-            </li>
-          ))}
+          {list.map((s) => {
+            const Icon = STATUS_ICON[s.status] ?? SendArrow;
+            const asset = s.display.asset === 'SOL' ? 'SOL' : short(s.display.asset);
+            return (
+              <li key={s.id}>
+                <button type="button" className="activity-row" onClick={() => openReview(s.id)}>
+                  <span className={`trade-avatar ${s.status}`} aria-hidden="true">
+                    <Icon size={17} />
+                  </span>
+                  <span className="token-name">
+                    <strong>
+                      Send {s.display.amount} {asset}
+                    </strong>
+                    <small>
+                      To {short(s.display.to)} · {BUILT_IN[s.cluster]?.label ?? s.cluster} · {when(s.createdAt)}
+                    </small>
+                  </span>
+                  <span className={`pill ${s.status}`}>{STATUS_LABEL[s.status] ?? s.status}</span>
+                  <ChevronRight size={16} className="row-chevron" />
+                </button>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </>
