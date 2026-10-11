@@ -42,7 +42,7 @@ history. It does not inject anything into websites.
 | `alarms` | Auto-lock after the idle period you choose. |
 | `idle` | Lock when your computer locks. |
 | Host access to `api.mainnet-beta.solana.com` and `api.devnet.solana.com` | Read balances and submit the transactions you approve. |
-| Host access to `127.0.0.1` | Only for developers running a local Solana validator on their own computer. Nothing is sent there unless you choose the local network. |
+| Host access to `127.0.0.1` | Development builds only, for developers running a local Solana validator; the store release has no loopback access. |
 
 The extension requests no other permissions, including no optional ones. A custom RPC
 endpoint you enter in Settings is reached over HTTPS like any web request; the RPC
