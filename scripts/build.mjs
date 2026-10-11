@@ -33,9 +33,12 @@ const dedupe = {
 
 await build({
   entryPoints: {
-    popup: join(root, 'src/ui/popup.js'),
-    review: join(root, 'src/ui/review.js'),
+    popup: join(root, 'src/ui/popup.jsx'),
+    review: join(root, 'src/ui/review.jsx'),
     background: join(root, 'src/background.js'),
+    // One stylesheet for both pages; Inter Variable is bundled from @fontsource-variable
+    // as local font files, so the pages load nothing remote.
+    styles: join(root, 'src/ui/styles.css'),
   },
   outdir: dist,
   bundle: true,
@@ -45,6 +48,9 @@ await build({
   splitting: false,
   minify: process.argv.includes('--minify'),
   sourcemap: false,
+  jsx: 'automatic',
+  loader: { '.woff2': 'file' },
+  assetNames: 'fonts/[name]-[hash]',
   legalComments: 'linked',
   define: { 'process.env.NODE_ENV': '"production"', global: 'globalThis' },
   inject: [join(root, 'scripts/buffer-shim.js')],
@@ -52,12 +58,20 @@ await build({
   logLevel: 'warning',
 });
 
-for (const f of ['ui/popup.html', 'ui/review.html', 'ui/styles.css'])
+for (const f of ['ui/popup.html', 'ui/review.html'])
   cpSync(join(root, 'src', f), join(dist, f.split('/').pop()));
 cpSync(join(root, 'src/manifest.json'), join(dist, 'manifest.json'));
 for (const f of ['mark.svg', 'icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png']) {
   const src = join(root, 'assets', f);
   if (existsSync(src)) cpSync(src, join(dist, 'icons', f));
+}
+// Inter is licensed under the SIL Open Font License; ship the license with the font files.
+cpSync(join(pkgDir('@fontsource-variable/inter'), 'LICENSE'), join(dist, 'fonts', 'LICENSE-Inter.txt'));
+// Extension pages run under script-src 'self': refuse to ship inline scripts or handlers.
+for (const f of ['popup.html', 'review.html']) {
+  const html = readFileSync(join(dist, f), 'utf8');
+  if (/<script(?![^>]*\bsrc=)[^>]*>/i.test(html) || /\son[a-z]+\s*=/i.test(html))
+    throw new Error(`${f} contains an inline script or event handler.`);
 }
 const manifest = JSON.parse(readFileSync(join(dist, 'manifest.json'), 'utf8'));
 writeFileSync(join(dist, 'build-info.json'), JSON.stringify({ version: manifest.version, builtAt: new Date().toISOString() }, null, 2));

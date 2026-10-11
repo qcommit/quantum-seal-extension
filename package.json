@@ -11,12 +11,15 @@
     "e2e": "node e2e/run.mjs"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "5.3.0",
     "@noble/hashes": "2.4.0",
     "@noble/post-quantum": "0.7.1",
     "@solana/web3.js": "3.0.2",
     "buffer": "6.0.3",
     "qrcode-generator": "1.4.4",
-    "quantum-seal-wallet": "file:../quantum-seal-wallet"
+    "quantum-seal-wallet": "file:../quantum-seal-wallet",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
     "esbuild": "0.25.10",
