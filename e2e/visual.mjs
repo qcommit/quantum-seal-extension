@@ -6,6 +6,7 @@
 //
 //   node e2e/visual.mjs                    # screenshots to .runtime/shots/visual/
 //   QS_AXE=/path/to/axe.min.js node e2e/visual.mjs   # also run axe-core on every scene
+//   QS_SCALE=2 node e2e/visual.mjs mainnet           # 2x screenshots (for store assets)
 //
 // It is a look-and-feel aid, not a test of wallet behaviour: run `npm run e2e` for that.
 import { build } from 'esbuild';
@@ -17,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
 const out = join(root, '.runtime/visual-build');
-const shots = join(root, '.runtime/shots/visual');
+const shots = process.env.QS_SHOTS ? resolve(process.env.QS_SHOTS) : join(root, '.runtime/shots/visual');
 const only = process.argv[2] ? new RegExp(process.argv[2]) : null;
 
 rmSync(out, { recursive: true, force: true });
@@ -136,6 +137,9 @@ const SCENES = [
   ['review-locked', 'review', 'review-locked&id=review', REVIEW],
   ['review-missing', 'review', 'review&id=nope', REVIEW],
   ['review-mainnet', 'review', 'review-mainnet&id=review', REVIEW],
+  // Mainnet variants used for the store screenshots (scripts/store-assets.mjs).
+  ['receive-mainnet', 'popup', 'home-mainnet', POPUP, [click('Receive', { exact: true })]],
+  ['review-done-mainnet', 'review', 'review-mainnet&id=done', REVIEW],
 ];
 
 const axePath = process.env.QS_AXE;
@@ -144,7 +148,7 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 const browser = await chromium.launch({ channel: 'chromium', headless: true });
 const violations = {};
 try {
-  const context = await browser.newContext({ reducedMotion: 'reduce' });
+  const context = await browser.newContext({ reducedMotion: 'reduce', deviceScaleFactor: Number(process.env.QS_SCALE) || 1 });
   await context.route('https://qs.visual/**', (route) => {
     const path = join(out, new URL(route.request().url()).pathname);
     if (!path.startsWith(out) || !existsSync(path)) return route.fulfill({ status: 404 });

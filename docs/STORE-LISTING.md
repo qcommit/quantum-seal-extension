@@ -36,7 +36,8 @@ Hold, send and receive Solana assets using post-quantum signatures.
 - **alarms:** auto-lock after the user's chosen idle period.
 - **idle:** lock the wallet when the computer locks.
 - **Host permissions (`api.mainnet-beta.solana.com`, `api.devnet.solana.com`):** read balances and submit user-approved transactions.
-- **Host permission (`127.0.0.1`):** developers can point the wallet at a local Solana validator; nothing is sent there unless the user selects the local network.
+- No loopback access: the release build (`npm run package`) removes the `127.0.0.1`
+  host permission and the local-validator network that development builds include.
 - No optional permissions, no content scripts, no access to web pages. Minimum Chrome version 120.
 
 ## Data use disclosures
@@ -45,8 +46,37 @@ Hold, send and receive Solana assets using post-quantum signatures.
 - Website content, browsing history, location and personal communications: not accessed.
 - Privacy policy: `PRIVACY.md` (host it at a public URL before submission, e.g. on the website).
 
-## Assets to prepare
+## Package
 
-- 128×128 icon: `assets/icon-128.png`
-- At least one 1280×800 screenshot (home, review, receive)
-- 440×280 promotional tile
+```sh
+npm run package            # release build at CORE_REF, zipped; refuses until mainnet is pinned
+npm run package -- --draft # same, for an unpinned mainnet (rehearsal only, never submit)
+```
+
+Writes `release/quantum-seal-extension-<version>.zip` and a `.sha256` next to it. The zip
+holds `dist/` with `manifest.json` at the root and `build-info.json`, which records the
+core commit and every file's hash. Upload that zip unchanged.
+
+## Images
+
+Regenerate with `node scripts/store-assets.mjs` (renders the real UI with fixture data,
+mainnet variants, at 2x). Output in `store/`:
+
+| File | Size | Use |
+| --- | --- | --- |
+| `assets/icon-128.png` | 128×128 | Store icon |
+| `store/screenshot-1-approve.png` | 1280×800 | Review window: post-quantum approval |
+| `store/screenshot-2-home.png` | 1280×800 | Home: balance, fee address, tokens |
+| `store/screenshot-3-receive.png` | 1280×800 | Receive + sent transfer |
+| `store/screenshot-4-private.png` | 1280×800 | Create wallet: keys stay on device |
+| `store/promo-small-440x280.png` | 440×280 | Small promo tile |
+| `store/promo-marquee-1400x560.png` | 1400×560 | Marquee (optional) |
+
+Balances and addresses in the images are fixtures, not real wallets.
+
+## Before submitting
+
+1. Mainnet deployed, immutable, and pinned (`docs/LAUNCH.md` in the core repository, step 6).
+2. `npm test && npm run e2e` pass, then `npm run package` (no `--draft`).
+3. Privacy policy hosted at a public URL (the website's `/privacy` page).
+4. Version in `src/manifest.json` and `package.json` bumped for each upload.
