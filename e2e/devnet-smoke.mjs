@@ -34,6 +34,7 @@ try {
   worker ??= await context.waitForEvent('serviceworker');
   const id = new URL(worker.url()).host;
   const popup = await context.newPage();
+  await popup.setViewportSize({ width: 400, height: 600 });
   await popup.goto(`chrome-extension://${id}/popup.html`);
   await popup.getByPlaceholder('Passphrase (12+ characters)').fill(PASS);
   await popup.getByPlaceholder('Repeat passphrase').fill(PASS);
@@ -55,7 +56,7 @@ try {
   console.log('PASS devnet wallet created; balance', await popup.locator('.balance .amount').textContent());
 
   const recipient = (await Keypair.generate()).publicKey;
-  await popup.locator('nav').getByRole('button', { name: 'Send' }).click();
+  await popup.getByRole('button', { name: 'Send', exact: true }).click();
   await popup.getByPlaceholder('Recipient address').fill(recipient.toBase58());
   await popup.getByPlaceholder('Amount').fill('0.01');
   const reviewPromise = context.waitForEvent('page');

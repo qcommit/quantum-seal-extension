@@ -47,6 +47,7 @@ const shots = process.env.QS_E2E_SHOTS === '1';
 async function shot(page, name) {
   if (!shots) return;
   mkdirSync(join(root, '.runtime/shots'), { recursive: true });
+  await sleep(450); // let sheet and fade animations settle
   await page.screenshot({ path: join(root, '.runtime/shots', `${name}.png`) });
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -106,6 +107,8 @@ try {
   worker ??= await context.waitForEvent('serviceworker');
   const extensionId = new URL(worker.url()).host;
   const popup = await context.newPage();
+  // The toolbar popup is 400x600.
+  await popup.setViewportSize({ width: 400, height: 600 });
   const popupUrl = `chrome-extension://${extensionId}/popup.html`;
   await popup.goto(popupUrl);
   // A development build is pinned to this validator through Settings storage.
@@ -132,6 +135,12 @@ try {
 
   // 3. Create the vault.
   await shot(popup, '01-welcome');
+  // Inter Variable is bundled with the extension and loads under its CSP.
+  const fonts = await popup.evaluate(async () => {
+    await document.fonts.ready;
+    return [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family);
+  });
+  assert.ok(fonts.some((f) => f.includes('Inter Variable')), `loaded fonts: ${fonts}`);
   await popup.getByPlaceholder('Passphrase (12+ characters)').fill(PASS);
   await popup.getByPlaceholder('Repeat passphrase').fill(PASS);
   await popup.getByRole('button', { name: 'Create wallet' }).click();
@@ -153,20 +162,32 @@ try {
   await shot(popup, '03-home');
   step('one funding transfer creates the wallet and moves the rest behind the post-quantum key');
 
-  // 5. Receive.
+  // The header's network picker opens a bottom sheet; mainnet stays disabled until pinned.
+  await popup.getByRole('button', { name: /^Viewing Local validator/ }).click();
+  const networks = popup.getByRole('dialog');
+  await networks.getByRole('button', { name: /Devnet/ }).waitFor();
+  assert.ok(await networks.getByRole('button', { name: /Mainnet/ }).isDisabled());
+  await shot(popup, '03b-network');
+  await networks.getByRole('button', { name: 'Close' }).click();
+
+  // 5. Receive (a bottom sheet).
   await popup.getByRole('button', { name: 'Receive', exact: true }).first().click();
+  const receiveSheet = popup.getByRole('dialog');
+  await receiveSheet.locator('code.address').waitFor({ timeout: 30000 });
   await shot(popup, '04-receive');
-  const walletAddress = new PublicKey((await popup.locator('code.address').textContent()).trim());
+  const walletAddress = new PublicKey((await receiveSheet.locator('code.address').textContent()).trim());
   assert.ok((await popup.locator('svg.qr').count()) === 1);
+  await receiveSheet.getByRole('button', { name: 'Close' }).click();
   assert.equal(await connection.getAccountInfo(walletAddress).then((a) => a.owner.toBase58()), programId.toBase58());
   step('receive shows the program-owned wallet address with a QR code');
 
   // 6. Send SOL, interrupt it mid-upload, then resume from on-chain state.
   const recipient = (await Keypair.generate()).publicKey;
   await send([SystemProgram.transfer({ fromPubkey: funder.publicKey, toPubkey: recipient, lamports: 1000000n })], [funder]);
-  await popup.locator('nav').getByRole('button', { name: 'Send' }).click();
+  await popup.getByRole('button', { name: 'Send', exact: true }).click();
   await popup.getByPlaceholder('Recipient address').fill(recipient.toBase58());
   await popup.getByPlaceholder('Amount').fill('0.25');
+  await shot(popup, '05a-send');
   const reviewPromise = context.waitForEvent('page');
   await popup.getByRole('button', { name: 'Review' }).click();
   let review = await reviewPromise;
@@ -198,6 +219,12 @@ try {
   await resume.first().click();
   await review.getByText('Sent.').waitFor({ timeout: 180000 });
   await shot(review, '06-sent');
+  // The done screen links the executing transaction on the explorer.
+  const execRecord = (await review.evaluate(async () => Object.values((await chrome.storage.local.get('sends')).sends)[0]))
+    .records.find((r) => r.phase === 'confirmed' && r.label.includes('execute-wallet-transfer'));
+  assert.ok(execRecord, 'execute transaction recorded');
+  const explorerHref = await review.getByRole('link', { name: /View on Solana Explorer/ }).getAttribute('href');
+  assert.ok(explorerHref.includes(`/tx/${execRecord.signature}`), explorerHref);
   const received = BigInt(await connection.getBalance(recipient, 'confirmed'));
   assert.equal(received, 1000000n + 250000000n);
   const sendRecord = await review.evaluate(async () => Object.values((await chrome.storage.local.get('sends')).sends)[0]);
@@ -258,24 +285,36 @@ try {
     [funder, mint],
   );
   await popup.locator('nav').getByRole('button', { name: 'Home' }).click();
-  await popup.getByText('5').first().waitFor({ timeout: 30000 });
+  await popup.locator('.token-row').filter({ hasText: '5' }).first().waitFor({ timeout: 30000 });
   assert.match(await popup.locator('main').textContent(), /Tokens/);
   await shot(popup, '07-home-tokens');
   step('home lists the wallet’s SPL token balance');
-  await popup.locator('nav').getByRole('button', { name: 'Send' }).click();
-  await popup.locator('select').selectOption(mint.publicKey.toBase58());
+  await popup.getByRole('button', { name: 'Send', exact: true }).click();
+  await popup.getByRole('button', { name: /^Asset:/ }).click();
+  await shot(popup, '07a-asset-picker');
+  await popup.getByRole('dialog').locator(`[data-asset="${mint.publicKey.toBase58()}"]`).click();
   await popup.getByPlaceholder('Recipient address').fill(recipient.toBase58());
   await popup.getByPlaceholder('Amount').fill('1.5');
   const tokenReviewPromise = context.waitForEvent('page');
   await popup.getByRole('button', { name: 'Review' }).click();
   const tokenReview = await tokenReviewPromise;
   await tokenReview.waitForLoadState();
+  await tokenReview.getByRole('heading', { name: 'Review transfer' }).waitFor();
+  const tokenText = await tokenReview.locator('main').textContent();
+  assert.ok(tokenText.includes(recipient.toBase58()) && tokenText.includes(recipientAta.toBase58()), 'token review shows recipient and its token account');
+  assert.match(tokenText, /1\.5 /);
+  await shot(tokenReview, '07b-token-review');
   await tokenReview.getByRole('button', { name: 'Approve & send' }).click();
   await tokenReview.getByText('Sent.').waitFor({ timeout: 180000 });
   const tokenBalance = await connection.getTokenAccountBalance(ata(recipient), 'confirmed');
   assert.equal(tokenBalance.value.amount, '1500000');
   step('an SPL token send completes through the review window');
   await tokenReview.close();
+  // Activity lists both sends as done.
+  await popup.locator('nav').getByRole('button', { name: 'Activity' }).click();
+  await popup.locator('.activity-row').nth(1).waitFor({ timeout: 30000 });
+  assert.equal(await popup.locator('.activity-row .pill.done').count(), 2);
+  await shot(popup, '07c-activity');
 
   // 7b. An unclear outcome: the RPC fails one transaction submission mid-send. The send
   // stops as "uncertain", the signature is checked, and resuming completes it once.
@@ -293,7 +332,7 @@ try {
   });
   await popup.locator('nav').getByRole('button', { name: 'Home' }).click();
   await popup.locator('.balance .amount').waitFor({ timeout: 60000 });
-  await popup.locator('nav').getByRole('button', { name: 'Send' }).click();
+  await popup.getByRole('button', { name: 'Send', exact: true }).click();
   await popup.getByPlaceholder('Recipient address').fill(uncertainTo.toBase58());
   await popup.getByPlaceholder('Amount').fill('0.1');
   const uncertainPromise = context.waitForEvent('page');
@@ -314,7 +353,7 @@ try {
   await uncertain.close();
 
   // 8. Lock, wrong passphrase, unlock.
-  await popup.locator('nav').getByRole('button', { name: 'Settings' }).click();
+  await popup.getByRole('button', { name: 'Settings', exact: true }).click();
   await popup.getByRole('button', { name: 'Lock now' }).click();
   await popup.getByRole('heading', { name: 'Welcome back' }).waitFor();
   await shot(popup, '08-locked');
@@ -327,7 +366,7 @@ try {
   step('lock clears access; a wrong passphrase is refused; the right one unlocks');
 
   // 9. Backup download.
-  await popup.locator('nav').getByRole('button', { name: 'Settings' }).click();
+  await popup.getByRole('button', { name: 'Settings', exact: true }).click();
   await popup.getByRole('button', { name: 'Back up wallet' }).click();
   const downloadPromise = popup.waitForEvent('download');
   await popup.getByRole('button', { name: 'Download backup' }).click();
@@ -340,7 +379,7 @@ try {
   step('backup downloads encrypted keys plus the wallet descriptor');
 
   // 10. Settings UI and auto-lock: set one minute, stay idle, and the wallet locks itself.
-  await popup.locator('nav').getByRole('button', { name: 'Settings' }).click();
+  await popup.getByRole('button', { name: 'Settings', exact: true }).click();
   await popup.getByLabel('Auto-lock after (minutes)').fill('1');
   await popup.getByRole('button', { name: 'Save' }).click();
   await popup.getByText('Saved.').waitFor({ timeout: 30000 }).catch(() => {});
