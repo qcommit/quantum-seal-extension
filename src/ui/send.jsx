@@ -1,9 +1,10 @@
 // Send: pick an asset, enter recipient and amount, then review in a separate window.
 import { useState } from 'react';
-import { service, lamportsToSol, errorText, openReview } from './common.js';
+import { service, lamportsToSol, errorText, openReview, solDisplay } from './common.js';
+import { NEEDS_TOKEN_ACCOUNT } from '../wallet-service.js';
 import { knownToken, tokenLabel } from '../tokens.js';
 import { ActionButton, ActionNotice, Field, Loading, Notice, Sheet, useAction, useLoad } from './components.jsx';
-import { ArrowLeft, Check, ChevronDown, Shield } from './icons.jsx';
+import { ArrowLeft, Check, ChevronDown, Coins, Shield } from './icons.jsx';
 
 export function SendPage({ onBack }) {
   const overview = useLoad(() => service.overview(), []);
@@ -12,9 +13,12 @@ export function SendPage({ onBack }) {
   const [to, setTo] = useState('');
   const [amount, setAmount] = useState('');
   const { busy, notice, setNotice, run } = useAction();
+  // Set when a token recipient has no account for the token yet: { rentLamports }.
+  const [needsAccount, setNeedsAccount] = useState(null);
   // An error about the old input goes away as soon as the input changes.
   const edit = (set) => (value) => {
     set(value);
+    setNeedsAccount(null);
     if (notice?.kind === 'error') setNotice(null);
   };
   const o = overview.data;
@@ -41,17 +45,32 @@ export function SendPage({ onBack }) {
     : [];
   const selected = assets.find((a) => a.id === asset) ?? assets[0];
 
+  const prepare = async () => {
+    const record = await service.prepareSend({
+      asset: asset === 'SOL' ? 'SOL' : 'TOKEN',
+      mint: asset === 'SOL' ? undefined : asset,
+      to: to.trim(),
+      amount: amount.trim(),
+    });
+    await openReview(record.id);
+    return 'Review window opened. Check the details there before you approve.';
+  };
   const review = () =>
     run(async () => {
-      const record = await service.prepareSend({
-        asset: asset === 'SOL' ? 'SOL' : 'TOKEN',
-        mint: asset === 'SOL' ? undefined : asset,
-        to: to.trim(),
-        amount: amount.trim(),
-      });
-      await openReview(record.id);
-      return 'Review window opened. Check the details there before you approve.';
+      try {
+        return await prepare();
+      } catch (error) {
+        if (error?.code !== NEEDS_TOKEN_ACCOUNT) throw error;
+        setNeedsAccount({ rentLamports: error.rentLamports });
+        return null;
+      }
     });
+  const createAndReview = () =>
+    run(async () => {
+      await service.createRecipientTokenAccount({ to: to.trim(), mint: asset });
+      setNeedsAccount(null);
+      return prepare();
+    }, 'Creating the recipient’s token account…');
 
   return (
     <>
@@ -124,9 +143,29 @@ export function SendPage({ onBack }) {
             />
           </Field>
           <ActionNotice notice={notice} />
-          <ActionButton busy={busy} disabled={!to.trim() || !amount.trim()} onClick={review}>
-            Review
-          </ActionButton>
+          {needsAccount ? (
+            <div className="fee-card backup-card" role="status">
+              <div className="fee-card-top">
+                <span className="fee-icon" aria-hidden="true">
+                  <Coins size={18} />
+                </span>
+                <p>
+                  The recipient has no account for this token yet
+                  <span>
+                    Quantum Seal can open one for them for {solDisplay(needsAccount.rentLamports, 8)} SOL, paid from your
+                    fee address. The SOL stays in that account, which the recipient owns.
+                  </span>
+                </p>
+              </div>
+              <ActionButton className="secondary" busy={busy} onClick={createAndReview}>
+                Create it and review
+              </ActionButton>
+            </div>
+          ) : (
+            <ActionButton busy={busy} disabled={!to.trim() || !amount.trim()} onClick={review}>
+              Review
+            </ActionButton>
+          )}
           <p className="hint">
             <Shield size={14} />
             <span>A separate window shows the exact transfer before anything is signed.</span>

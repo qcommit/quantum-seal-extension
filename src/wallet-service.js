@@ -10,6 +10,7 @@ import {
   PublicKey,
   SystemProgram,
   Transaction,
+  TransactionInstruction,
   LAMPORTS_PER_SOL,
 } from '@solana/web3.js';
 import { openNetwork, rateLimitedFetch } from 'quantum-seal-wallet/network';
@@ -28,7 +29,7 @@ import { closeProofInstruction, TOKEN_PROGRAM } from 'quantum-seal-wallet/instru
 import { submit } from 'quantum-seal-wallet/client';
 import { BUILT_IN, deploymentFor, networkConfig, isAvailable, mergeSettings } from './networks.js';
 import { ownDescriptor, verifyOwnDescriptor, verifyOwnState } from './descriptors.js';
-import { describeIntent, tokenAccountFor } from './intent.js';
+import { describeIntent, tokenAccountFor, ASSOCIATED_TOKEN_PROGRAM } from './intent.js';
 import { withLock, LockBusy } from './locks.js';
 import { errorText } from './errors.js';
 
@@ -220,6 +221,7 @@ export function receiptsOf(tx, wallet, ownedTokenAccounts = []) {
   return out;
 }
 
+export const NEEDS_TOKEN_ACCOUNT = 'needs-token-account';
 const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 const MINT_BYTES = 82;
 const TOKEN_ACCOUNT_BYTES = 165;
@@ -699,10 +701,13 @@ export function createWalletService({
         }
         const source = pickTokenSource(accounts, await tokenAccountFor(d.wallet, mintKey.toBase58()), needed);
         const destination = await tokenAccountFor(recipient.toBase58(), mintKey.toBase58());
-        if (!(await connection.getAccountInfo(new PublicKey(destination), network.commitment)))
-          throw new Error(
-            'The recipient has no account for this token yet. Ask them to create one, then send again.',
-          );
+        if (!(await connection.getAccountInfo(new PublicKey(destination), network.commitment))) {
+          // The Send page offers to create it (createRecipientTokenAccount), then prepares again.
+          const error = new Error('The recipient has no account for this token yet.');
+          error.code = NEEDS_TOKEN_ACCOUNT;
+          error.rentLamports = BigInt(await connection.getMinimumBalanceForRentExemption(TOKEN_ACCOUNT_BYTES));
+          throw error;
+        }
         prepared = await prepareTokenTransfer(network, d, {
           source: source.address,
           mint: mintKey.toBase58(),
@@ -997,6 +1002,49 @@ export function createWalletService({
         if (keys.length) await storage.local.remove(keys);
       });
       cached = null;
+    },
+    // Opens the recipient's associated token account for `mint`, paid by the fee key, after
+    // the user agreed on the Send page. It is not part of any signed approval: it only spends
+    // fee-key SOL (the account's rent, which stays with the account the recipient owns).
+    // Idempotent, so retrying after an unclear outcome is safe.
+    async createRecipientTokenAccount({ to, mint }) {
+      const { network, connection } = await session();
+      const d = await descriptor();
+      const info = await ownerInfo();
+      const recipient = parseAddress(to);
+      const mintKey = parseAddress(mint, 'token mint address');
+      const ownWallets = (info.descriptors[network.cluster] ?? []).map((x) => x.wallet);
+      await checkRecipient(connection, network, recipient, d.wallet, ownWallets);
+      const mintAccount = await connection.getAccountInfo(mintKey, network.commitment);
+      if (!mintAccount || mintAccount.owner.toBase58() !== TOKEN_PROGRAM.toBase58())
+        throw new Error('That token is not a classic SPL token.');
+      const destination = new PublicKey(await tokenAccountFor(recipient.toBase58(), mintKey.toBase58()));
+      if (await connection.getAccountInfo(destination, network.commitment)) return { address: destination.toBase58(), created: false };
+      const payer = await vault.feeKeypair();
+      const rent = BigInt(await connection.getMinimumBalanceForRentExemption(TOKEN_ACCOUNT_BYTES));
+      const balance = BigInt(await connection.getBalance(payer.publicKey, network.commitment));
+      if (balance < rent + 10000n)
+        throw new Error(`Your fee address needs ${lamportsToSol(rent + 10000n - balance)} SOL more to create the account.`);
+      const instruction = new TransactionInstruction({
+        programId: ASSOCIATED_TOKEN_PROGRAM,
+        keys: [
+          { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+          { pubkey: destination, isSigner: false, isWritable: true },
+          { pubkey: recipient, isSigner: false, isWritable: false },
+          { pubkey: mintKey, isSigner: false, isWritable: false },
+          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+          { pubkey: new PublicKey(TOKEN_PROGRAM.toBase58()), isSigner: false, isWritable: false },
+        ],
+        data: Buffer.from([1]), // CreateIdempotent
+      });
+      // Sent directly by the fee key (the SDK's submitter only carries wallet-program
+      // instructions), like the fee sweep.
+      const latest = await connection.getLatestBlockhash(network.commitment);
+      const tx = new Transaction({ feePayer: payer.publicKey, recentBlockhash: latest.blockhash }).add(instruction);
+      await tx.sign(payer);
+      const signature = await connection.sendRawTransaction(await tx.serialize(), { preflightCommitment: network.commitment });
+      await confirmByPolling(connection, signature, latest.lastValidBlockHeight, network.commitment);
+      return { address: destination.toBase58(), created: true, signature, rentLamports: rent };
     },
     async listSends() {
       return (await allSends()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));

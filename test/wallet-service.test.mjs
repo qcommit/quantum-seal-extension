@@ -562,3 +562,24 @@ test('approve refuses an expiry set from a slot reported too far ahead', async (
   await assert.rejects(t.service.approve(record.id, record.digest), /expiry is further ahead/);
   assert.equal((await stored(t.storage, record.id)).approval ?? null, null);
 });
+
+test('createRecipientTokenAccount opens the recipient token account from the fee key, once', async () => {
+  const t = await setup();
+  const mint = await key();
+  t.chain.accounts.set(mint, { lamports: 1461600n, executable: false, owner: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'), data: new Uint8Array(82) });
+  const to = await key();
+  const made = await t.service.createRecipientTokenAccount({ to, mint });
+  assert.equal(made.created, true);
+  const { message } = t.chain.connection.sent.at(-1);
+  const programs = message.compiledInstructions.map((ix) => message.staticAccountKeys[ix.programIdIndex].toBase58());
+  assert.deepEqual(programs, ['ATokenGPvbdGVxr1b2hvZ9zbHQBhL1v8Tq9GZy3s3pVm']);
+  assert.equal(message.staticAccountKeys[0].toBase58(), t.created.feePayer);
+  // Already there: nothing is sent.
+  t.chain.accounts.set(made.address, { lamports: 2039280n, executable: false, owner: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'), data: new Uint8Array(165) });
+  const sent = t.chain.connection.sent.length;
+  assert.equal((await t.service.createRecipientTokenAccount({ to, mint })).created, false);
+  assert.equal(t.chain.connection.sent.length, sent);
+  // Never for a mint that is not a classic SPL token, or for a refused recipient.
+  await assert.rejects(t.service.createRecipientTokenAccount({ to, mint: await key() }), /not a classic SPL token/);
+  await assert.rejects(t.service.createRecipientTokenAccount({ to: t.d.wallet, mint }), /own address/);
+});

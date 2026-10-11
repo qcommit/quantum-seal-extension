@@ -1,7 +1,7 @@
 {
   "status": "passed",
-  "finishedAt": "2026-10-11T11:07:50.406Z",
-  "program": "7cQEv6NiafqQaP3wJzdQ8mPsQKkPEbbqgfhjLUzd2Nhf",
+  "finishedAt": "2026-10-11T11:20:19.214Z",
+  "program": "AZcEoD8N5e6eDHfgW8P4LufhQsjLrxb6wkyUSskY16x2",
   "steps": [
     "local validator runs the wallet program",
     "extension loads and is pinned to the local deployment",
@@ -14,6 +14,7 @@
     "the fee refund keeps the fee key topped up",
     "home lists the wallet’s SPL token balance",
     "an SPL token send completes through the review window; Activity shows sends and received transfers",
+    "a token send to a new holder opens their token account (after asking) and delivers",
     "an unclear submission stops as uncertain, is checked by signature, and resumes to exactly one transfer",
     "a send superseded by another at the same nonce is reported \"Not sent\" and its proof deposit is reclaimed",
     "a fee key below its float is refilled from the wallet through a reviewed sealed send",

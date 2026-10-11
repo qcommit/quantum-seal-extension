@@ -248,7 +248,14 @@ export const service = {
       r(3, 60 * 50, { asset: 'SOL', amount: '0.53', from: FEE, fromFeeAddress: true }),
     ];
   },
-  prepareSend: fail('The recipient has no account for this token yet. Ask them to create one, then send again.'),
+  async prepareSend() {
+    if (scene !== 'send-needs-account') throw new Error('Not enough SOL in the wallet for this amount.');
+    const error = new Error('The recipient has no account for this token yet.');
+    error.code = 'needs-token-account';
+    error.rentLamports = 2039280n;
+    throw error;
+  },
+  createRecipientTokenAccount: never,
   setupWallet: never,
   sweepExcess: never,
   topUpFeeKey: never,

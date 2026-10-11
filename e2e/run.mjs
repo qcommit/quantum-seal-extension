@@ -334,6 +334,28 @@ try {
   assert.ok(incoming.some((t) => /Received [\d.]+ SOL/.test(t) && t.includes('From your fee address')), incoming.join(' | '));
   await shot(popup, '07c-activity');
 
+  // 7a. A token send to someone who never held the token: the Send page offers to open
+  // their token account from the fee address first, then reviews as usual.
+  const newcomer = (await Keypair.generate()).publicKey;
+  await popup.locator('nav').getByRole('button', { name: 'Home' }).click();
+  await popup.getByRole('button', { name: 'Send', exact: true }).click();
+  await popup.getByRole('button', { name: /^Asset:/ }).click();
+  await popup.getByRole('dialog').locator(`[data-asset="${mint.publicKey.toBase58()}"]`).click();
+  await popup.getByPlaceholder('Recipient address').fill(newcomer.toBase58());
+  await popup.getByPlaceholder('Amount').fill('0.5');
+  await popup.getByRole('button', { name: 'Review' }).click();
+  await popup.getByText('The recipient has no account for this token yet').waitFor({ timeout: 60000 });
+  assert.equal(await connection.getAccountInfo(await ataOf(newcomer), 'confirmed'), null, 'nothing created before the user agrees');
+  const newcomerReviewPromise = context.waitForEvent('page');
+  await popup.getByRole('button', { name: 'Create it and review' }).click();
+  const newcomerReview = await newcomerReviewPromise;
+  await newcomerReview.waitForLoadState();
+  await newcomerReview.getByRole('button', { name: 'Approve & send' }).click();
+  await newcomerReview.getByText('Sent.').waitFor({ timeout: 180000 });
+  assert.equal((await connection.getTokenAccountBalance(await ataOf(newcomer), 'confirmed')).value.amount, '500000');
+  await newcomerReview.close();
+  step('a token send to a new holder opens their token account (after asking) and delivers');
+
   // 7b. An unclear outcome: the RPC fails one transaction submission mid-send. The send
   // stops as "uncertain", the signature is checked, and resuming completes it once.
   const uncertainTo = (await Keypair.generate()).publicKey;
