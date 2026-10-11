@@ -212,7 +212,7 @@ try {
   const reviewText = await review.locator('main').textContent();
   assert.match(reviewText, /0\.25 SOL/);
   assert.ok(reviewText.includes(recipient.toBase58()));
-  assert.match(reviewText, /Fee refill to your fee key/);
+  assert.match(reviewText, /Fee refill to your fee address/);
   step('the review window shows the decoded recipient, amount and fee refill before signing');
   const reviewUrl = review.url();
   await review.getByRole('button', { name: 'Approve & send' }).click();

@@ -17,11 +17,21 @@ import {
   onStorageChange,
   onSendsChange,
 } from './common.js';
-import { KeyValue, Loading, Mark, Notice, Spinner, TestNetworkBanner } from './components.jsx';
+import { ActionButton, KeyValue, Loading, Mark, Notice, Spinner, TestNetworkBanner } from './components.jsx';
 import { describeIntent, tokenAccountFor } from '../intent.js';
 import { Alert, Check, External, Lock, Shield } from './icons.jsx';
 
 const id = new URLSearchParams(location.search).get('id');
+// What the amount above the details means in each state.
+const EYEBROW = {
+  review: 'You are sending',
+  signed: 'Approved, not sent yet',
+  submitting: 'Sending',
+  done: 'Sent',
+  failed: 'Not finished',
+  uncertain: 'Sending, waiting for a check',
+  notSent: 'Not sent',
+};
 const CHUNKS = 11;
 // Labels the SDK attaches to each transaction, in order. Some transactions combine
 // steps (e.g. "upload-chunk+seal-proof+verify-batch-1-8"), so steps match by inclusion.
@@ -92,7 +102,7 @@ function Review() {
       }
       view.feePayer = (await vault.publicInfo())?.feePayer ?? null;
       if (view.fee && view.feePayer && view.fee.to !== view.feePayer)
-        view.problems.push('The fee refill in this approval goes to an address that is not your fee key.');
+        view.problems.push('The fee refill in this approval goes to an address that is not your fee address.');
       if (view.kind === 'token') {
         let expected = null;
         try {
@@ -173,8 +183,12 @@ function Review() {
   if (!record)
     return (
       <Shell>
-        <main className="review-main">
-          <Notice kind="error">This send no longer exists.</Notice>
+        <main className="review-main center">
+          <span className="empty-icon warn" aria-hidden="true">
+            <Alert size={22} />
+          </span>
+          <h1>This send no longer exists</h1>
+          <p className="muted">It was removed from this browser. Close this window.</p>
         </main>
       </Shell>
     );
@@ -182,11 +196,11 @@ function Review() {
     return (
       <Shell network={record.cluster}>
         <main className="review-main center">
-          <span className="empty-icon">
+          <span className="empty-icon" aria-hidden="true">
             <Lock size={22} />
           </span>
           <h1>Wallet locked</h1>
-          <p className="muted">Unlock it from the toolbar button, then reopen this send.</p>
+          <p className="muted">Unlock Quantum Seal from the toolbar, then open this send again from Activity.</p>
         </main>
       </Shell>
     );
@@ -212,9 +226,9 @@ function Review() {
         >
           Cancel
         </button>
-        <button type="button" className="primary" disabled={running || blocked} onClick={() => run(true, view.digest)}>
+        <ActionButton className="primary" busy={running} disabled={blocked} onClick={() => run(true, view.digest)}>
           Approve &amp; send
-        </button>
+        </ActionButton>
       </>
     );
   else if (record.status === 'uncertain' && !running)
@@ -265,10 +279,10 @@ function Review() {
 
   return (
     <Shell network={record.cluster}>
-      <main className="review-main">
+      <main className="review-main review-scroll" tabIndex={0} aria-label="Transfer">
         <h1>{inReview ? 'Review transfer' : 'Transfer'}</h1>
         <section className="review-hero" aria-label="Amount">
-          <p className="eyebrow">{inReview ? 'You are sending' : notSent ? 'Not sent' : record.status === 'done' ? 'Sent' : 'Sending'}</p>
+          <p className="eyebrow">{EYEBROW[notSent ? 'notSent' : record.status] ?? 'Sending'}</p>
           <p className="review-amount">
             {amount} <small>{unit}</small>
           </p>
@@ -315,7 +329,9 @@ function Review() {
           </div>
         ) : null}
 
-        {!inReview && !notSent ? <Progress record={record} live={running || record.status === 'submitting'} /> : null}
+        {!inReview && !notSent && record.status !== 'done' ? (
+          <Progress record={record} live={running || record.status === 'submitting'} />
+        ) : null}
 
         {record.status === 'uncertain' && !running ? (
           <div className="result warn">
@@ -333,9 +349,19 @@ function Review() {
         ) : null}
         {(record.status === 'failed' || record.status === 'signed') && !running ? (
           <>
-            {record.error ? <Notice kind="error">{friendlyMessage(record.error)}</Notice> : null}
+            {record.error ? (
+              <div className="result error" role="alert">
+                <span className="result-icon">
+                  <Alert size={18} />
+                </span>
+                <div>
+                  <p className="result-title">This send stopped.</p>
+                  <p>{friendlyMessage(record.error)}</p>
+                </div>
+              </div>
+            ) : null}
             <p className="muted small">
-              Resuming continues from what is already on-chain, with the same signed approval. Discarding returns the proof
+              Resume continues from what is already on-chain, with the same signed approval. Discard returns the proof
               deposit to your fee address; the signed approval itself stays valid until slot {record.expiry}.
             </p>
           </>
@@ -352,7 +378,10 @@ function Review() {
           <Notice kind="error">{view.problems.join(' ')} Do not approve it; cancel and prepare the send again.</Notice>
         ) : null}
 
-        <section className="card review-details" aria-label="Transfer details">
+        <h2 className="card-label" id="details-label">
+          Details
+        </h2>
+        <section className="card review-details" aria-labelledby="details-label">
           {view.amount ? <KeyValue label="Send">{`${amount} ${unit}`}</KeyValue> : null}
           {view.recipient ? (
             <KeyValue label={view.kind === 'token' ? 'To (recipient wallet)' : 'To'} mono>
@@ -375,7 +404,7 @@ function Review() {
           </KeyValue>
           {view.fee ? (
             view.fee.to === view.feePayer ? (
-              <KeyValue label="Fee refill to your fee key">{`${lamportsToSol(view.fee.lamports)} SOL`}</KeyValue>
+              <KeyValue label="Fee refill to your fee address">{`${lamportsToSol(view.fee.lamports)} SOL`}</KeyValue>
             ) : (
               <KeyValue label="Fee refill to" mono>{`${lamportsToSol(view.fee.lamports)} SOL → ${view.fee.to}`}</KeyValue>
             )
