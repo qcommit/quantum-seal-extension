@@ -9,8 +9,7 @@ import {
   short,
   errorText,
   openReview,
-  onStorageChange,
-  SENDS_KEY,
+  onSendsChange,
 } from './common.js';
 import { ActionNotice, CopyButton, Loading, Notice, QrCode, useAction, useLoad } from './components.jsx';
 import {
@@ -34,6 +33,7 @@ export const SETUP_MINIMUM_LAMPORTS = FEE_FLOAT_LAMPORTS + 10000000n;
 export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSettings }) {
   const [poll, setPoll] = useState(0);
   const setup = useAction();
+  const sweep = useAction();
   const overview = useLoad(() => service.overview(), [reloadKey, poll]);
   const o = overview.data;
   const initialized = o?.initialized;
@@ -104,6 +104,46 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
           <span>Send</span>
         </button>
       </div>
+
+      {o.sweepableLamports > 0n ? (
+        <div className="fee-card low" role="status">
+          <div className="fee-card-top">
+            <span className="fee-icon">
+              <Fuel size={18} />
+            </span>
+            <p>
+              {solDisplay(o.sweepableLamports, 6)} SOL is waiting on your fee address
+              <span>
+                Fees need only {solDisplay(FEE_FLOAT_LAMPORTS, 3)} SOL there. Move the rest into your wallet.
+              </span>
+            </p>
+          </div>
+          <button
+            type="button"
+            className="secondary"
+            disabled={sweep.busy}
+            onClick={() =>
+              sweep.run(async () => {
+                await service.sweepExcess();
+                setPoll((p) => p + 1);
+                return 'Moved into your wallet.';
+              }, 'Moving SOL into your wallet…')
+            }
+          >
+            Move to wallet
+          </button>
+        </div>
+      ) : null}
+      {/* Outside the card: it disappears once the SOL has moved. */}
+      <ActionNotice notice={sweep.notice} />
+      {o.otherWallets?.length ? (
+        <Notice kind="warn">
+          An earlier {o.label} wallet of yours still holds{' '}
+          {o.otherWallets.map((w) => `${solDisplay(w.lamports)} SOL at ${short(w.wallet, 5)}`).join(', ')}. It belongs to a
+          previous deployment of the wallet program; to move it, use a build pinned to that deployment (program{' '}
+          {short(o.otherWallets[0].program, 5)}).
+        </Notice>
+      ) : null}
 
       {lowFees ? (
         <div className="fee-card low" role="status">
@@ -211,6 +251,7 @@ function Setup({ o, action, refreshing, onRefresh, error }) {
       <div className="page-heading">
         <h1>Set up your wallet</h1>
         <p>
+          Watching <strong>{o.label}</strong>.{' '}
           Send at least {lamportsToSol(SETUP_MINIMUM_LAMPORTS)} SOL to this setup address. The extension creates your
           post-quantum wallet, keeps {lamportsToSol(FEE_FLOAT_LAMPORTS)} SOL here for network fees, and moves everything
           else into the wallet.
@@ -262,11 +303,14 @@ const STATUS_LABEL = {
   done: 'Done',
   failed: 'Failed',
   uncertain: 'Uncertain',
+  superseded: 'Not sent',
+  expired: 'Expired',
+  discarded: 'Discarded',
 };
 
 export function ActivityTab() {
   const [version, setVersion] = useState(0);
-  useEffect(() => onStorageChange([SENDS_KEY], () => setVersion((v) => v + 1)), []);
+  useEffect(() => onSendsChange(() => setVersion((v) => v + 1)), []);
   const sends = useLoad(() => service.listSends(), [version]);
   const list = sends.data ?? [];
   return (

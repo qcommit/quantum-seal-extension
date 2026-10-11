@@ -257,6 +257,7 @@ code, .mono { font-family: var(--mono); }
 .pill.done { background: #1a2e28; color: var(--mint); }
 .pill.failed { background: #3a1f28; color: #ff9fb2; }
 .pill.uncertain { background: #3a2d1a; color: var(--amber); }
+.pill.superseded, .pill.expired, .pill.discarded { background: #2c2a33; color: #b9b4c4; }
 
 /* ---------- Settings ---------- */
 .settings-label { margin: 20px 2px 9px; font-size: 12px; font-weight: 550; color: #c4c1cc; }
@@ -362,3 +363,12 @@ dialog.sheet[open]::backdrop { animation: fade .2s ease-out; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- Test network banner (every non-mainnet screen) ---------- */
+.test-banner {
+  display: flex; align-items: center; gap: 7px; flex-shrink: 0; margin: 0;
+  padding: 7px 18px; font-size: 10.5px; line-height: 1.45; color: #ffe2b5;
+  background: #2a2116; border-bottom: 1px solid #ffcf8526;
+}
+.test-banner svg { flex-shrink: 0; color: var(--amber); }
+.test-banner strong { font-weight: 600; color: #fff0d6; }

@@ -2,11 +2,23 @@
 // decoded transfer before signing, then the send's progress through the SDK's steps.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { decodeIntent, fromHex } from 'quantum-seal-wallet/codec';
+import { decodeIntent, fromHex, hex, intentDigest } from 'quantum-seal-wallet/codec';
 import { BUILT_IN, explorerUrl } from '../networks.js';
-import { vault, service, short, touch, trackActivity, errorText, lamportsToSol, onStorageChange, SENDS_KEY } from './common.js';
-import { KeyValue, Loading, Mark, Notice, Spinner } from './components.jsx';
-import { describeIntent, tokenAccountFor } from './intent.js';
+import { executeSignature } from '../wallet-service.js';
+import {
+  vault,
+  service,
+  short,
+  touch,
+  trackActivity,
+  errorText,
+  friendlyMessage,
+  lamportsToSol,
+  onStorageChange,
+  onSendsChange,
+} from './common.js';
+import { KeyValue, Loading, Mark, Notice, Spinner, TestNetworkBanner } from './components.jsx';
+import { describeIntent, tokenAccountFor } from '../intent.js';
 import { Alert, Check, External, Lock, Shield } from './icons.jsx';
 
 const id = new URLSearchParams(location.search).get('id');
@@ -71,7 +83,10 @@ function Review() {
       // Everything shown comes from the signed intent bytes; stored display fields are
       // only used where the intent can vouch for them.
       try {
-        view = describeIntent(decodeIntent(fromHex(record.intentHex)), { cluster: record.cluster });
+        const bytes = fromHex(record.intentHex);
+        view = describeIntent(decodeIntent(bytes), { cluster: record.cluster });
+        // Approve signs only if the stored bytes still have this digest.
+        view.digest = hex(intentDigest(bytes));
       } catch (error) {
         view = { kind: 'unknown', problems: [`This approval could not be decoded (${errorText(error)}).`] };
       }
@@ -94,10 +109,15 @@ function Review() {
   }, []);
   useEffect(() => {
     reload();
-    return onStorageChange([SENDS_KEY, 'unlocked'], reload);
+    const offSends = onSendsChange(reload);
+    const offLock = onStorageChange(['unlocked'], reload);
+    return () => {
+      offSends();
+      offLock();
+    };
   }, [reload]);
 
-  const run = async (sign) => {
+  const run = async (sign, digest) => {
     if (runningRef.current) return;
     runningRef.current = true;
     setRunning(true);
@@ -107,7 +127,7 @@ function Review() {
     try {
       if (sign) {
         setMessage({ kind: 'info', text: 'Signing with your post-quantum key…' });
-        await service.approve(id);
+        await service.approve(id, digest);
         setMessage(null);
       }
       await reload();
@@ -121,6 +141,16 @@ function Review() {
       runningRef.current = false;
       setRunning(false);
       await reload();
+    }
+  };
+  const discard = async () => {
+    touch();
+    setMessage(null);
+    try {
+      await service.discardSend(id);
+      window.close();
+    } catch (error) {
+      setMessage({ kind: 'error', text: errorText(error) });
     }
   };
   const checkStatus = async () => {
@@ -167,7 +197,8 @@ function Review() {
   const network = BUILT_IN[record.cluster]?.label ?? record.cluster;
   const blocked = view.problems.length > 0;
   const inReview = record.status === 'review';
-  const exec = record.records.find((r) => r.phase === 'confirmed' && r.label.includes('execute-wallet-transfer'));
+  const execSignature = executeSignature(record);
+  const notSent = ['superseded', 'expired', 'discarded'].includes(record.status);
 
   let footer = null;
   if (inReview)
@@ -177,14 +208,11 @@ function Review() {
           type="button"
           className="secondary"
           disabled={running}
-          onClick={async () => {
-            await service.discardSend(id);
-            window.close();
-          }}
+          onClick={discard}
         >
           Cancel
         </button>
-        <button type="button" className="primary" disabled={running || blocked} onClick={() => run(true)}>
+        <button type="button" className="primary" disabled={running || blocked} onClick={() => run(true, view.digest)}>
           Approve &amp; send
         </button>
       </>
@@ -202,9 +230,25 @@ function Review() {
     );
   else if ((record.status === 'failed' || record.status === 'signed') && !running)
     footer = (
-      <button type="button" className="primary" onClick={() => run(false)}>
-        Resume
-      </button>
+      <>
+        <button type="button" className="secondary" onClick={discard}>
+          Discard
+        </button>
+        <button type="button" className="primary" onClick={() => run(false)}>
+          Resume
+        </button>
+      </>
+    );
+  else if (notSent && !running)
+    footer = (
+      <>
+        <button type="button" className="secondary" onClick={discard}>
+          Remove
+        </button>
+        <button type="button" className="primary" onClick={() => window.close()}>
+          Close
+        </button>
+      </>
     );
   else if (record.status === 'submitting' && !running)
     footer = (
@@ -224,7 +268,7 @@ function Review() {
       <main className="review-main">
         <h1>{inReview ? 'Review transfer' : 'Transfer'}</h1>
         <section className="review-hero" aria-label="Amount">
-          <p className="eyebrow">{inReview ? 'You are sending' : 'Sending'}</p>
+          <p className="eyebrow">{inReview ? 'You are sending' : notSent ? 'Not sent' : record.status === 'done' ? 'Sent' : 'Sending'}</p>
           <p className="review-amount">
             {amount} <small>{unit}</small>
           </p>
@@ -238,8 +282,9 @@ function Review() {
             </span>
             <div>
               <p className="result-title">Sent.</p>
-              {exec ? (
-                <a href={explorerUrl(record.cluster, 'tx', exec.signature)} target="_blank" rel="noopener noreferrer">
+              {record.executedElsewhere ? <p>It was executed by another transaction with your signed approval.</p> : null}
+              {execSignature ? (
+                <a href={explorerUrl(record.cluster, 'tx', execSignature)} target="_blank" rel="noopener noreferrer">
                   View on Solana Explorer <External size={13} />
                 </a>
               ) : null}
@@ -247,7 +292,30 @@ function Review() {
           </div>
         ) : null}
 
-        {!inReview ? <Progress record={record} live={running || record.status === 'submitting'} /> : null}
+        {notSent ? (
+          <div className="result warn">
+            <span className="result-icon">
+              <Alert size={18} />
+            </span>
+            <div>
+              <p className="result-title">Nothing was sent.</p>
+              <p>
+                {record.status === 'superseded'
+                  ? 'The wallet moved on (another transfer used this approval’s turn), so this approval can no longer execute. No funds left your wallet for it.'
+                  : record.status === 'expired'
+                    ? 'This approval expired before it could run. No funds left your wallet for it.'
+                    : 'You discarded this send.'}
+              </p>
+              {record.reclaimSignature ? (
+                <p>Its proof deposit ({lamportsToSol(record.reclaimedLamports)} SOL) went back to your fee address.</p>
+              ) : record.reclaimError ? (
+                <p>Its proof deposit is still held; it is returned automatically the next time you open the wallet.</p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {!inReview && !notSent ? <Progress record={record} live={running || record.status === 'submitting'} /> : null}
 
         {record.status === 'uncertain' && !running ? (
           <div className="result warn">
@@ -265,8 +333,11 @@ function Review() {
         ) : null}
         {(record.status === 'failed' || record.status === 'signed') && !running ? (
           <>
-            {record.error ? <Notice kind="error">{record.error}</Notice> : null}
-            <p className="muted small">Resuming continues from what is already on-chain, with the same signed approval.</p>
+            {record.error ? <Notice kind="error">{friendlyMessage(record.error)}</Notice> : null}
+            <p className="muted small">
+              Resuming continues from what is already on-chain, with the same signed approval. Discarding returns the proof
+              deposit to your fee address; the signed approval itself stays valid until slot {record.expiry}.
+            </p>
           </>
         ) : null}
         {record.status === 'submitting' ? (
@@ -321,7 +392,13 @@ function Review() {
           </p>
         ) : null}
       </main>
-      {footer ? <footer className={`review-footer${inReview || record.status === 'uncertain' ? ' two' : ''}`}>{footer}</footer> : null}
+      {footer ? (
+        <footer
+          className={`review-footer${inReview || notSent || ['uncertain', 'failed', 'signed'].includes(record.status) ? ' two' : ''}`}
+        >
+          {footer}
+        </footer>
+      ) : null}
     </Shell>
   );
 }
@@ -337,6 +414,7 @@ function Shell({ network, children }) {
         </span>
         {network ? <span className={`net-pill net-${network}`}>{BUILT_IN[network]?.label ?? network}</span> : null}
       </header>
+      <TestNetworkBanner cluster={network} label={BUILT_IN[network]?.label ?? network} />
       {children}
     </div>
   );

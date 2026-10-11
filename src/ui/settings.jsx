@@ -1,6 +1,6 @@
 // Settings (RPC override, auto-lock, developer pins, backup, lock) and the backup page.
 import { useState } from 'react';
-import { BUILT_IN, deploymentFor } from '../networks.js';
+import { BUILT_IN, deploymentFor, isAvailable, networkConfig } from '../networks.js';
 import { vault, getSettings, saveSettings, touch } from './common.js';
 import { ActionNotice, Field, Loading, useAction, useLoad } from './components.jsx';
 import { ArrowLeft, ChevronRight, Code, Download, Key, Lock } from './icons.jsx';
@@ -47,6 +47,9 @@ function SettingsForm({ initial, onBack, onBackup, onLock }) {
         if (entries.length) next.deployments[cluster] = values;
         else delete next.deployments[cluster];
       }
+      // Check the endpoint and pins now, so a typo cannot break every screen later.
+      const deployment = deploymentFor(next);
+      if (isAvailable(deployment)) networkConfig(deployment);
       await saveSettings(next);
       // Re-arm the auto-lock timer now, so it uses the new duration.
       touch();

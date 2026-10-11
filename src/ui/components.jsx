@@ -188,6 +188,19 @@ export function Field({ label, hint, unit, children, className = '' }) {
   );
 }
 
+// Persistent strip on every non-mainnet screen: addresses and SOL there are test-only.
+export function TestNetworkBanner({ cluster, label }) {
+  if (!cluster || cluster === 'mainnet-beta') return null;
+  return (
+    <p className={`test-banner net-${cluster}`} role="note">
+      <Alert size={13} />
+      <span>
+        <strong>Test network · {label}.</strong> Test SOL only. Never send real (mainnet) SOL to these addresses.
+      </span>
+    </p>
+  );
+}
+
 export function KeyValue({ label, children, mono = false }) {
   return (
     <div className="kv">

@@ -1,13 +1,14 @@
 // Shared state and helpers for the popup and review pages. No DOM building here: the
 // pages are React components; this module only wires the tested logic layer to chrome.*.
 import { createVaultStore } from '../vault.js';
-import { createWalletService, SETTINGS_KEY, SENDS_KEY, lamportsToSol } from '../wallet-service.js';
+import { createWalletService, SETTINGS_KEY, lamportsToSol, isSendKey } from '../wallet-service.js';
 import { mergeSettings } from '../networks.js';
+import { errorText, friendlyMessage } from '../errors.js';
 
 export const storage = { local: chrome.storage.local, session: chrome.storage.session };
 export const vault = createVaultStore(storage);
 export const service = createWalletService({ vault, storage });
-export { lamportsToSol, SETTINGS_KEY, SENDS_KEY };
+export { lamportsToSol, SETTINGS_KEY, errorText, friendlyMessage };
 
 export async function getSettings() {
   return mergeSettings((await storage.local.get(SETTINGS_KEY))[SETTINGS_KEY]);
@@ -31,12 +32,17 @@ export function onStorageChange(keys, fn) {
   chrome.storage.onChanged.addListener(listener);
   return () => chrome.storage.onChanged.removeListener(listener);
 }
+// Calls fn() whenever any send in the journal (one storage key per send) changes.
+export function onSendsChange(fn) {
+  const listener = (changes, area) => {
+    if (area === 'local' && Object.keys(changes).some(isSendKey)) fn();
+  };
+  chrome.storage.onChanged.addListener(listener);
+  return () => chrome.storage.onChanged.removeListener(listener);
+}
 
 export function short(address, n = 4) {
   return address ? `${address.slice(0, n)}…${address.slice(-n)}` : '';
-}
-export function errorText(error) {
-  return error?.message ?? String(error);
 }
 // Rounds a SOL amount for display only (never for signing): at most `digits` decimals.
 export function solDisplay(lamports, digits = 4) {

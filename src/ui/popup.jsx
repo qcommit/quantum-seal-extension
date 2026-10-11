@@ -13,7 +13,7 @@ import {
   errorText,
   SETTINGS_KEY,
 } from './common.js';
-import { CopyButton, Loading, Mark, Notice, QrCode, Sheet, useLoad } from './components.jsx';
+import { CopyButton, Loading, Mark, Notice, QrCode, Sheet, TestNetworkBanner, useLoad } from './components.jsx';
 import { Check, ChevronDown, Gear, Globe, History, Home, Lock } from './icons.jsx';
 import { Welcome, Unlock } from './onboarding.jsx';
 import { HomeTab, ActivityTab } from './home.jsx';
@@ -66,14 +66,25 @@ function Wallet({ onLock }) {
     scroller.current?.scrollTo(0, 0);
   }, [initialized]);
   useEffect(() => onStorageChange([SETTINGS_KEY], () => setSettingsVersion((v) => v + 1)), []);
+  // On open (and per network): settle abandoned sends and return their proof deposits to
+  // the fee key; refresh Home if any came back.
+  const sweptFor = useRef(null);
   const settings = useLoad(async () => {
     const s = await getSettings();
     return { settings: s, available: await service.availability() };
   }, [settingsVersion]);
+  const cluster = settings.data?.settings.cluster;
+  useEffect(() => {
+    if (!cluster || sweptFor.current === cluster) return;
+    sweptFor.current = cluster;
+    service
+      .reclaimAbandoned()
+      .then(({ reclaimed }) => reclaimed && setReloadKey((k) => k + 1))
+      .catch(() => {});
+  }, [cluster]);
   if (!settings.data) return <Loading label="Loading settings" />;
 
   const { settings: s, available } = settings.data;
-  const cluster = s.cluster;
   const deployment = deploymentFor(s);
   let host = deployment.rpc;
   try {
@@ -119,6 +130,8 @@ function Wallet({ onLock }) {
           <Gear size={19} />
         </button>
       </header>
+
+      <TestNetworkBanner cluster={cluster} label={deployment.label} />
 
       <main className="page-scroll" ref={scroller} key={`${cluster}:${page}`}>
         {page === 'home' ? (
@@ -177,7 +190,7 @@ function Wallet({ onLock }) {
         />
       </Sheet>
       <Sheet open={sheet === 'receive'} onClose={() => setSheet(null)} title="Receive">
-        <Receive label={deployment.label} />
+        <Receive label={deployment.label} cluster={cluster} />
       </Sheet>
     </div>
   );
@@ -223,16 +236,19 @@ function NetworkList({ current, available, onPick }) {
   );
 }
 
-function Receive({ label }) {
+function Receive({ label, cluster }) {
   const d = useLoad(() => service.descriptor(), []);
   if (d.error) return <Notice kind="error">{errorText(d.error)}</Notice>;
   if (!d.data) return <Loading label="Loading address" />;
   return (
     <div className="receive">
       <p className="sheet-copy">
-        Send SOL or classic SPL tokens on <strong>{label}</strong> to this address. It stays the same even if you
-        rotate keys later.
+        Send SOL or classic SPL tokens (not Token-2022) on <strong>{label}</strong> to this address. It is derived from
+        your key, so your backup always recovers it.
       </p>
+      {cluster !== 'mainnet-beta' ? (
+        <Notice kind="warn">This is a {label} address: test SOL only. Real SOL sent here is lost.</Notice>
+      ) : null}
       <div className="address-card">
         <QrCode text={d.data.wallet} />
         <code className="address">{d.data.wallet}</code>
