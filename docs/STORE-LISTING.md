@@ -80,4 +80,5 @@ Balances and addresses in the images are fixtures, not real wallets.
 2. `npm test`, `npm run build && npm run e2e` and `node e2e/release-smoke.mjs` pass, then
    `npm run package` (no `--draft`).
 3. Privacy policy URL above still matches `PRIVACY.md`.
-4. Version in `src/manifest.json` and `package.json` bumped for each upload.
+4. Version in `src/manifest.json` and `package.json` bumped for each upload, with an entry in
+   `CHANGELOG.md`.
