@@ -105,6 +105,7 @@ const SCENES = [
   ['activity', 'popup', 'home', POPUP, [nav('Activity')]],
   ['activity-end', 'popup', 'home', POPUP, [nav('Activity'), scrollEnd]],
   ['activity-empty', 'popup', 'activity-empty', POPUP, [nav('Activity')]],
+  ['activity-receipts-error', 'popup', 'activity-receipts-error', POPUP, [nav('Activity')]],
   ['send', 'popup', 'home', POPUP, [click('Send', { exact: true })]],
   ['send-assets', 'popup', 'home', POPUP, [click('Send', { exact: true }), click(/^Asset/)]],
   [

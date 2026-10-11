@@ -36,6 +36,11 @@ export const SEND_PREFIX = 'send:';
 // Journals written by earlier versions: one map of every send under this key.
 export const LEGACY_SENDS_KEY = 'sends';
 export const SETTINGS_KEY = 'settings';
+// Cached incoming-transfer results, one key per network and wallet.
+const RECEIPTS_PREFIX = 'receipts:';
+// How many recent transactions per account Activity looks through for incoming transfers.
+// A sealed send adds about a dozen to the wallet's history; those are skipped unfetched.
+const RECEIPT_LOOKBACK = 50;
 // The SDK labels the executing transaction "execute-wallet-transfer+reclaim-proof-rent".
 export const EXECUTE_LABEL = 'execute-wallet-transfer';
 // Each send reimburses the fee key from the wallet (12 transactions x 5,000 lamports
@@ -146,6 +151,42 @@ function parseAddress(value, what = 'address') {
     throw new Error(what === 'address' ? 'That is not a valid Solana address.' : `That is not a valid ${what}.`);
   }
 }
+// Raw token units as a decimal string (no rounding): 1250000 with 6 decimals -> "1.25".
+export function formatUnits(raw, decimals) {
+  const digits = BigInt(raw).toString().padStart(decimals + 1, '0');
+  if (!decimals) return digits;
+  const frac = digits.slice(-decimals).replace(/0+$/, '');
+  return frac ? `${digits.slice(0, -decimals)}.${frac}` : digits.slice(0, -decimals);
+}
+// What a transaction delivered to this wallet: SOL into the wallet account and tokens into
+// accounts it owns, each as one entry. Outgoing or unchanged balances give nothing.
+export function receiptsOf(tx, wallet, ownedTokenAccounts = []) {
+  const meta = tx?.meta;
+  if (!meta || meta.err) return [];
+  const message = tx.transaction?.message ?? {};
+  const keys = [
+    ...(message.staticAccountKeys ?? message.accountKeys ?? []),
+    ...(meta.loadedAddresses?.writable ?? []),
+    ...(meta.loadedAddresses?.readonly ?? []),
+  ].map((k) => (typeof k === 'string' ? k : (k.pubkey ?? k).toBase58()));
+  const from = keys[0] ?? null;
+  const out = [];
+  const i = keys.indexOf(wallet);
+  if (i >= 0 && meta.preBalances?.[i] !== undefined && meta.postBalances?.[i] !== undefined) {
+    const delta = BigInt(meta.postBalances[i]) - BigInt(meta.preBalances[i]);
+    if (delta > 0n) out.push({ asset: 'SOL', amount: lamportsToSol(delta), from });
+  }
+  const owned = new Set(ownedTokenAccounts);
+  const mine = (b) => b.owner === wallet || owned.has(keys[b.accountIndex]);
+  for (const post of meta.postTokenBalances ?? []) {
+    if (!mine(post)) continue;
+    const pre = (meta.preTokenBalances ?? []).find((b) => b.accountIndex === post.accountIndex);
+    const delta = BigInt(post.uiTokenAmount.amount) - BigInt(pre?.uiTokenAmount.amount ?? '0');
+    if (delta > 0n) out.push({ asset: post.mint, amount: formatUnits(delta, post.uiTokenAmount.decimals), from });
+  }
+  return out;
+}
+
 const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 const MINT_BYTES = 82;
 const TOKEN_ACCOUNT_BYTES = 165;
@@ -788,6 +829,58 @@ export function createWalletService({
       return { reclaimed };
     },
 
+    // Incoming transfers from chain history: SOL into the wallet and tokens into its token
+    // accounts, newest first. Each transaction is fetched once and its result cached per
+    // wallet, so reopening Activity costs only the history lookups.
+    async listReceipts() {
+      const { network, connection, deployment } = await session();
+      const d = await descriptor();
+      const status = await ownStatus(network, d);
+      if (!status.initialized) return [];
+      const { commitment } = network;
+      const wallet = new PublicKey(d.wallet);
+      const tokenAccounts = (
+        await connection.getParsedTokenAccountsByOwner(wallet, { programId: TOKEN_PROGRAM }, commitment)
+      ).value.map((a) => a.pubkey.toBase58());
+      const signatures = new Map();
+      for (const address of [d.wallet, ...tokenAccounts]) {
+        const list = await connection.getSignaturesForAddress(new PublicKey(address), { limit: RECEIPT_LOOKBACK }, commitment);
+        for (const sig of list) if (!sig.err && !signatures.has(sig.signature)) signatures.set(sig.signature, sig);
+      }
+      // This extension's own transactions (uploads, executes, reclaims) deliver nothing in.
+      const own = new Set(
+        (await allSends()).flatMap((r) => [...(r.records ?? []).map((x) => x.signature), r.executeSignature, r.reclaimSignature]),
+      );
+      for (const sig of own) signatures.delete(sig);
+      const key = `${RECEIPTS_PREFIX}${deployment.cluster}:${d.wallet}`;
+      const cache = (await storage.local.get(key))[key] ?? {};
+      const missing = [...signatures.keys()].filter((sig) => !(sig in cache));
+      // Two at a time: public RPC endpoints rate-limit bursts.
+      for (let i = 0; i < missing.length; i += 2)
+        await Promise.all(
+          missing.slice(i, i + 2).map(async (sig) => {
+            const tx = await connection.getTransaction(sig, { commitment, maxSupportedTransactionVersion: 0 });
+            if (!tx) return;
+            const blockTime = tx.blockTime ?? signatures.get(sig).blockTime ?? null;
+            cache[sig] = { blockTime: blockTime === null ? null : Number(blockTime), items: receiptsOf(tx, d.wallet, tokenAccounts) };
+          }),
+        );
+      const kept = Object.fromEntries([...signatures.keys()].filter((sig) => sig in cache).map((sig) => [sig, cache[sig]]));
+      await storage.local.set({ [key]: kept });
+      const info = await ownerInfo();
+      return Object.entries(kept)
+        .flatMap(([signature, r]) =>
+          r.items.map((item, n) => ({
+            id: `${signature}:${n}`,
+            signature,
+            cluster: deployment.cluster,
+            at: r.blockTime ? new Date(r.blockTime * 1000).toISOString() : null,
+            ...item,
+            fromFeeAddress: item.from === info.feePayer,
+          })),
+        )
+        .sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''));
+    },
     async listSends() {
       return (await allSends()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     },

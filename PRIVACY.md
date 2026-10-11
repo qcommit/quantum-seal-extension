@@ -16,7 +16,8 @@ network requests go to the Solana RPC endpoint you use.
   or when the browser quits. On macOS, closing every Chrome window does not quit Chrome.
 - **Public wallet details** (wallet addresses, the network you chose, your settings) and a
   **journal of your sends** (the signed transfer, transaction signatures and progress), so
-  interrupted sends can resume. These are public blockchain data.
+  interrupted sends can resume, and a cache of incoming transfers read from the chain for
+  the Activity tab. These are public blockchain data.
 
 Nothing is synced to any cloud service by the extension. Uninstalling the extension or
 clearing its data deletes all of it, so keep a backup file.
@@ -24,8 +25,8 @@ clearing its data deletes all of it, so keep a backup file.
 ## What leaves your device
 
 - **Requests to the Solana RPC endpoint** you selected (by default the public Solana
-  endpoints for mainnet or devnet): balance and account reads, and the transactions you
-  approve. The RPC operator can see your IP address and the public addresses involved.
+  endpoints for mainnet or devnet): balance, account and transaction-history reads for your
+  wallet, and the transactions you approve. The RPC operator can see your IP address and the public addresses involved.
 - **Transactions you approve** are published on the Solana blockchain, which is public.
 
 The extension does not contact any Quantum Seal server, does not use analytics or

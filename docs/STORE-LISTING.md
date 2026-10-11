@@ -18,7 +18,7 @@ public key into your private key. Quantum Seal approves every transfer with SLH-
 (NIST FIPS 205), a hash-based signature, and the wallet program checks it on-chain before
 any funds move.
 
-- Send and receive SOL and classic SPL tokens
+- Send and receive SOL and classic SPL tokens, with a history of transfers in and out
 - Review the exact transfer in the extension's own window before signing
 - Your wallet address on each network is derived from your key, so a backup always recovers it
 - Keys stay on your device, encrypted with your passphrase
@@ -32,7 +32,7 @@ Hold, send and receive Solana assets using post-quantum signatures.
 
 ## Permission justifications
 
-- **storage:** encrypted keys, settings and a journal of sends so interrupted sends resume.
+- **storage:** encrypted keys, settings, a journal of sends so interrupted sends resume, and a cache of incoming transfers.
 - **alarms:** auto-lock after the user's chosen idle period.
 - **idle:** lock the wallet when the computer locks.
 - **Host permissions (`api.mainnet-beta.solana.com`, `api.devnet.solana.com`):** read balances and submit user-approved transactions.

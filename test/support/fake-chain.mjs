@@ -170,10 +170,10 @@ export async function fakeChain() {
       });
     },
     // A confirmed transaction in `address`'s history built from `message`.
-    addHistory(address, message, signature) {
+    addHistory(address, message, signature, meta = {}) {
       transactions.set(signature, {
         slot: chain.slot,
-        meta: { err: null, fee: 5000n },
+        meta: { err: null, fee: 5000n, ...meta },
         transaction: { message, signatures: [signature] },
       });
       note(b58(address), { signature, err: null, blockTime: Math.floor(Date.now() / 1000), slot: chain.slot });

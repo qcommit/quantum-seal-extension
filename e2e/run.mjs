@@ -320,12 +320,17 @@ try {
   await tokenReview.getByText('Sent.').waitFor({ timeout: 180000 });
   const tokenBalance = await connection.getTokenAccountBalance(ata(recipient), 'confirmed');
   assert.equal(tokenBalance.value.amount, '1500000');
-  step('an SPL token send completes through the review window');
+  step('an SPL token send completes through the review window; Activity shows sends and received transfers');
   await tokenReview.close();
   // Activity lists both sends as done.
   await popup.locator('nav').getByRole('button', { name: 'Activity' }).click();
   await popup.locator('.activity-row').nth(1).waitFor({ timeout: 30000 });
   assert.equal(await popup.locator('.activity-row .pill.done').count(), 2);
+  // ...and, from chain history, what came in: the setup funding and the minted tokens.
+  await popup.locator('.activity-row .pill.received').nth(1).waitFor({ timeout: 60000 });
+  const incoming = await popup.locator('a.activity-row').allTextContents();
+  assert.ok(incoming.some((t) => t.includes('Received 5 ') && t.includes(`From ${funder.publicKey.toBase58().slice(0, 4)}`)), incoming.join(' | '));
+  assert.ok(incoming.some((t) => /Received [\d.]+ SOL/.test(t) && t.includes('From your fee address')), incoming.join(' | '));
   await shot(popup, '07c-activity');
 
   // 7b. An unclear outcome: the RPC fails one transaction submission mid-send. The send

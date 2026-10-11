@@ -230,6 +230,17 @@ export const service = {
   async getSend(id) {
     return (await sends()).find((s) => s.id === id) ?? null;
   },
+  async listReceipts() {
+    if (scene === 'activity-empty') return [];
+    if (scene === 'activity-receipts-error') throw new Error('Failed to fetch');
+    const ago = (minutes) => new Date(Date.now() - minutes * 60000).toISOString();
+    const r = (n, minutes, item) => ({ id: `rx${n}:0`, signature: `rx${n}`, cluster, at: ago(minutes), fromFeeAddress: false, ...item });
+    return [
+      r(1, 3, { asset: 'SOL', amount: '1.5', from: TO }),
+      r(2, 60 * 30, { asset: MINT, amount: '5', from: TO }),
+      r(3, 60 * 50, { asset: 'SOL', amount: '0.53', from: FEE, fromFeeAddress: true }),
+    ];
+  },
   prepareSend: fail('The recipient has no account for this token yet. Ask them to create one, then send again.'),
   setupWallet: never,
   sweepExcess: never,

@@ -1,7 +1,7 @@
 {
   "status": "passed",
-  "finishedAt": "2026-10-11T10:11:22.056Z",
-  "program": "C9n5S5Y1MqckGg2KqC2tJpxaoXnH2TAam3UEmx5w8HvU",
+  "finishedAt": "2026-10-11T10:22:37.871Z",
+  "program": "DeKkHrQDfTH31HCLaWdK1YyLZfNak9VicHcegtWmCjDK",
   "steps": [
     "local validator runs the wallet program",
     "extension loads and is pinned to the local deployment",
@@ -13,7 +13,7 @@
     "the resumed send completes with exactly 11 uploaded chunks and the exact amount",
     "the fee refund keeps the fee key topped up",
     "home lists the wallet’s SPL token balance",
-    "an SPL token send completes through the review window",
+    "an SPL token send completes through the review window; Activity shows sends and received transfers",
     "an unclear submission stops as uncertain, is checked by signature, and resumes to exactly one transfer",
     "a send superseded by another at the same nonce is reported \"Not sent\" and its proof deposit is reclaimed",
     "a fee key below its float is refilled from the wallet through a reviewed sealed send",

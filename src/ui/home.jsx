@@ -1,6 +1,6 @@
 // Home tab (setup, balance, fee key, tokens) and the Activity tab.
 import { useEffect, useState } from 'react';
-import { BUILT_IN } from '../networks.js';
+import { BUILT_IN, explorerUrl } from '../networks.js';
 import { FEE_FLOAT_LAMPORTS } from '../wallet-service.js';
 import {
   vault,
@@ -34,6 +34,7 @@ import {
   Coins,
   Copy,
   Check,
+  External,
   Fuel,
   Inbox,
   Refresh,
@@ -404,48 +405,92 @@ export function ActivityTab() {
   const [version, setVersion] = useState(0);
   useEffect(() => onSendsChange(() => setVersion((v) => v + 1)), []);
   const sends = useLoad(() => service.listSends(), [version]);
-  const list = sends.data ?? [];
+  // Read from chain history: slower, and a failure here must not hide the sends.
+  const receipts = useLoad(() => service.listReceipts(), []);
+  const items = [
+    ...(sends.data ?? []).map((s) => ({ kind: 'send', key: s.id, at: s.createdAt, s })),
+    ...(receipts.data ?? []).map((r) => ({ kind: 'receipt', key: r.id, at: r.at, r })),
+  ].sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''));
+  const settled = sends.data && (receipts.data || receipts.error);
   return (
     <>
       <div className="page-heading">
         <h1>Activity</h1>
-        <p>Sends from this browser. Open one for details, or to resume it.</p>
+        <p>Transfers in and out of this wallet. Open a send for details, or to resume it.</p>
       </div>
       {sends.loading && !sends.data ? <Loading label="Loading activity" /> : null}
       {sends.error ? <Notice kind="error">{errorText(sends.error)}</Notice> : null}
-      {sends.data && !list.length ? (
+      {receipts.error ? <Notice kind="warn">Received transfers could not be loaded: {errorText(receipts.error)}</Notice> : null}
+      {settled && !items.length ? (
         <Empty level={2} icon={<Inbox size={22} />} title="No activity yet">
-          <p>Sends from this wallet appear here with their status.</p>
+          <p>Transfers to and from this wallet appear here.</p>
         </Empty>
       ) : null}
-      {list.length ? (
+      {items.length ? (
         <ul className="activity-list">
-          {list.map((s) => {
-            const Icon = STATUS_ICON[s.status] ?? SendArrow;
-            const asset = s.display.asset === 'SOL' ? 'SOL' : short(s.display.asset);
-            return (
-              <li key={s.id}>
-                <button type="button" className="activity-row" onClick={() => openReview(s.id)}>
-                  <span className={`trade-avatar ${s.status}`} aria-hidden="true">
-                    <Icon size={17} />
-                  </span>
-                  <span className="token-name">
-                    <strong>
-                      Send {s.display.amount} {asset}
-                    </strong>
-                    <small>
-                      To {short(s.display.to)} · {BUILT_IN[s.cluster]?.label ?? s.cluster} · {when(s.createdAt)}
-                    </small>
-                  </span>
-                  <span className={`pill ${s.status}`}>{STATUS_LABEL[s.status] ?? s.status}</span>
-                  <ChevronRight size={16} className="row-chevron" />
-                </button>
-              </li>
-            );
-          })}
+          {items.map((item) => (
+            <li key={item.key}>{item.kind === 'send' ? <SendRow s={item.s} /> : <ReceiptRow r={item.r} />}</li>
+          ))}
         </ul>
       ) : null}
+      {sends.data && receipts.loading && !receipts.data ? (
+        <p className="hint activity-checking">
+          <span className="btn-spinner" aria-hidden="true" />
+          <span>Checking for received transfers…</span>
+        </p>
+      ) : null}
     </>
+  );
+}
+
+function SendRow({ s }) {
+  const Icon = STATUS_ICON[s.status] ?? SendArrow;
+  const asset = s.display.asset === 'SOL' ? 'SOL' : short(s.display.asset);
+  return (
+    <button type="button" className="activity-row" onClick={() => openReview(s.id)}>
+      <span className={`trade-avatar ${s.status}`} aria-hidden="true">
+        <Icon size={17} />
+      </span>
+      <span className="token-name">
+        <strong>
+          Send {s.display.amount} {asset}
+        </strong>
+        <small>
+          To {short(s.display.to)} · {BUILT_IN[s.cluster]?.label ?? s.cluster} · {when(s.createdAt)}
+        </small>
+      </span>
+      <span className={`pill ${s.status}`}>{STATUS_LABEL[s.status] ?? s.status}</span>
+      <ChevronRight size={16} className="row-chevron" />
+    </button>
+  );
+}
+
+function ReceiptRow({ r }) {
+  const asset = r.asset === 'SOL' ? 'SOL' : short(r.asset);
+  const from = r.fromFeeAddress ? 'your fee address' : short(r.from);
+  return (
+    <a
+      className="activity-row"
+      href={explorerUrl(r.cluster, 'tx', r.signature)}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`Received ${r.amount} ${asset} from ${from}. View on Solana Explorer`}
+    >
+      <span className="trade-avatar received" aria-hidden="true">
+        <ArrowDown size={17} />
+      </span>
+      <span className="token-name">
+        <strong title={r.asset === 'SOL' ? undefined : r.asset}>
+          Received {r.amount} {asset}
+        </strong>
+        <small>
+          From {from} · {BUILT_IN[r.cluster]?.label ?? r.cluster}
+          {r.at ? ` · ${when(r.at)}` : ''}
+        </small>
+      </span>
+      <span className="pill received">Received</span>
+      <External size={14} className="row-chevron" />
+    </a>
   );
 }
 

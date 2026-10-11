@@ -15,6 +15,8 @@ import {
   EXPIRED_TEXT,
   FEE_FLOAT_LAMPORTS,
   MAX_FINISHED_SENDS,
+  receiptsOf,
+  formatUnits,
 } from '../src/wallet-service.js';
 import { fakeStorage } from './support/fake-storage.mjs';
 import { fakeChain } from './support/fake-chain.mjs';
@@ -424,4 +426,64 @@ test('the fee key is offered a top-up from the wallet only when that send can ru
   assert.equal(topUpAmount({ ...base, feeLamports: 62000000n, availableLamports: shortfall + FEE_REFUND_LAMPORTS - 1n }), 0n);
   assert.equal(topUpAmount({ ...base, feeLamports: 62000000n, availableLamports: shortfall + FEE_REFUND_LAMPORTS }), shortfall);
   assert.equal(topUpAmount({ ...base, initialized: false, feeLamports: 62000000n }), 0n);
+});
+
+test('receiptsOf reads SOL and token deliveries to this wallet only', async () => {
+  const wallet = await key();
+  const sender = await key();
+  const ata = await key();
+  const mint = await key();
+  const keys = [sender, wallet, ata].map((k) => new PublicKey(k));
+  const tx = (meta) => ({ transaction: { message: { staticAccountKeys: keys } }, meta: { err: null, ...meta } });
+  assert.deepEqual(receiptsOf(tx({ preBalances: [9n, 0n, 0n], postBalances: [4n, 5000000000n, 0n] }), wallet), [
+    { asset: 'SOL', amount: '5', from: sender },
+  ]);
+  assert.deepEqual(receiptsOf(tx({ preBalances: [9n, 7n, 0n], postBalances: [9n, 2n, 0n] }), wallet), []);
+  assert.deepEqual(receiptsOf({ ...tx({ preBalances: [0n, 0n], postBalances: [0n, 9n] }), meta: { err: {}, preBalances: [0n, 0n], postBalances: [0n, 9n] } }, wallet), []);
+  const balance = (amount, extra = {}) => ({ accountIndex: 2, mint, uiTokenAmount: { amount, decimals: 6 }, ...extra });
+  const token = tx({
+    preBalances: [1n, 1n, 1n],
+    postBalances: [1n, 1n, 1n],
+    preTokenBalances: [balance('1000000', { owner: wallet })],
+    postTokenBalances: [balance('2250000', { owner: wallet })],
+  });
+  assert.deepEqual(receiptsOf(token, wallet), [{ asset: mint, amount: '1.25', from: sender }]);
+  // Older RPC responses omit the owner: an account the wallet holds still counts.
+  const noOwner = tx({ preBalances: [], postBalances: [], postTokenBalances: [balance('5')] });
+  assert.deepEqual(receiptsOf(noOwner, wallet, [ata]), [{ asset: mint, amount: '0.000005', from: sender }]);
+  assert.deepEqual(receiptsOf(noOwner, wallet), []);
+  assert.equal(formatUnits(10n, 0), '10');
+  assert.equal(formatUnits(1200n, 3), '1.2');
+  assert.equal(formatUnits(5n, 9), '0.000000005');
+});
+
+test('listReceipts lists incoming transfers and fetches each transaction once', async () => {
+  const t = await setup();
+  const sender = await key();
+  const keys = [sender, t.d.wallet].map((k) => new PublicKey(k));
+  t.chain.addHistory(t.d.wallet, { staticAccountKeys: keys }, 'in-1', { preBalances: [9n, 1n], postBalances: [4n, 1000000001n] });
+  t.chain.addHistory(t.d.wallet, { staticAccountKeys: keys }, 'out-1', { preBalances: [9n, 9n], postBalances: [9n, 4n] });
+  const feeKeys = [t.created.feePayer, t.d.wallet].map((k) => new PublicKey(k));
+  t.chain.addHistory(t.d.wallet, { staticAccountKeys: feeKeys }, 'in-2', { preBalances: [9n, 0n], postBalances: [4n, 500000000n] });
+  let fetched = 0;
+  const getTransaction = t.chain.connection.getTransaction;
+  t.chain.connection.getTransaction = async (...args) => {
+    fetched++;
+    return getTransaction(...args);
+  };
+  const list = await t.service.listReceipts();
+  // Both land in the same second here, so compare without relying on their order.
+  assert.deepEqual(list.map((r) => [r.signature, r.asset, r.amount, r.from, r.fromFeeAddress]).sort(), [
+    ['in-1', 'SOL', '1', sender, false],
+    ['in-2', 'SOL', '0.5', t.created.feePayer, true],
+  ]);
+  assert.equal(fetched, 3);
+  await t.service.listReceipts();
+  assert.equal(fetched, 3, 'cached transactions are not fetched again');
+  // A send's own transactions are known from the journal and never fetched.
+  const record = await t.service.prepareSend({ to: sender, amount: '0.01' });
+  await edit(t.storage, record.id, (r) => r.records.push({ phase: 'prepared', label: 'begin-proof+upload-chunk', signature: 'mine-1' }));
+  t.chain.addHistory(t.d.wallet, { staticAccountKeys: keys }, 'mine-1', { preBalances: [9n, 9n], postBalances: [9n, 9n] });
+  assert.equal((await t.service.listReceipts()).length, 2);
+  assert.equal(fetched, 3);
 });
