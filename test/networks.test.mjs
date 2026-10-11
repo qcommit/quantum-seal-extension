@@ -35,3 +35,15 @@ test('the built-in devnet deployment is pinned and parses', () => {
   assert.equal(config.program, '6LBRd57jagVvhmpX1idsw9QXhoNHMHWstvpeGdSZAexT');
   assert.equal(config.programSize, 141744);
 });
+
+test('new installs default to mainnet only once mainnet is pinned', async () => {
+  const { defaultCluster, BUILT_IN, isTestNetwork } = await import('../src/networks.js');
+  assert.equal(defaultCluster(), BUILT_IN['mainnet-beta'].program ? 'mainnet-beta' : 'devnet');
+  assert.equal(defaultCluster({ 'mainnet-beta': { ...BUILT_IN['mainnet-beta'] } }), 'devnet');
+  assert.equal(defaultCluster({ 'mainnet-beta': { ...BUILT_IN['mainnet-beta'], ...pins, upgradeAuthority: null } }), 'mainnet-beta');
+  assert.equal(mergeSettings(null).cluster, defaultCluster());
+  assert.equal(mergeSettings({ cluster: 'localnet' }).cluster, 'localnet');
+  assert.equal(isTestNetwork('devnet'), true);
+  assert.equal(isTestNetwork('localnet'), true);
+  assert.equal(isTestNetwork('mainnet-beta'), false);
+});

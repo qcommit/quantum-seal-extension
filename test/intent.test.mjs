@@ -4,7 +4,7 @@ import { Keypair } from '@solana/web3.js';
 import { encodeIntent, decodeIntent } from 'quantum-seal-wallet/codec';
 import { tokenTransferAction } from 'quantum-seal-wallet/instructions';
 import { GENESIS } from 'quantum-seal-wallet/network';
-import { describeIntent, formatUnits, tokenAccountFor } from '../src/ui/intent.js';
+import { describeIntent, formatUnits, tokenAccountFor } from '../src/intent.js';
 
 const key = async () => (await Keypair.generate()).publicKey.toBase58();
 async function intent(action, { genesis = GENESIS.devnet, fee = null, wallet } = {}) {

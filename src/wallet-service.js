@@ -1,6 +1,10 @@
 // Wallet operations for the extension, built on the core SDK. Every chain write goes
 // through the SDK's pinned-deployment checks; sends are journaled so an interrupted
 // send resumes from on-chain state instead of being signed or submitted again.
+//
+// Journal: each send is stored under its own key (`send:<id>`), so pages never overwrite
+// each other's records, and every state change of one send happens under a Web Lock
+// named after it, so it is approved at most once and executed by one page at a time.
 import {
   Connection,
   PublicKey,
@@ -10,7 +14,6 @@ import {
 } from '@solana/web3.js';
 import { openNetwork, rateLimitedFetch } from 'quantum-seal-wallet/network';
 import {
-  createDescriptor,
   walletStatus,
   initializeWallet,
   prepareSolTransfer,
@@ -20,23 +23,45 @@ import {
   parseUnits,
 } from 'quantum-seal-wallet/wallet';
 import { signApproval, parseApproval } from 'quantum-seal-wallet/approval';
-import { decodeIntent, hex, PROOF_BYTES } from 'quantum-seal-wallet/codec';
+import { decodeIntent, intentDigest, deriveProof, hex, fromHex, PROOF_BYTES } from 'quantum-seal-wallet/codec';
 import { closeProofInstruction, TOKEN_PROGRAM } from 'quantum-seal-wallet/instructions';
 import { submit } from 'quantum-seal-wallet/client';
-import { deploymentFor, networkConfig, isAvailable } from './networks.js';
+import { BUILT_IN, deploymentFor, networkConfig, isAvailable, mergeSettings } from './networks.js';
+import { ownDescriptor, verifyOwnDescriptor, verifyOwnState } from './descriptors.js';
+import { describeIntent, tokenAccountFor } from './intent.js';
+import { withLock, LockBusy } from './locks.js';
+import { errorText } from './errors.js';
 
-export const SENDS_KEY = 'sends';
+export const SEND_PREFIX = 'send:';
+// Journals written by earlier versions: one map of every send under this key.
+export const LEGACY_SENDS_KEY = 'sends';
 export const SETTINGS_KEY = 'settings';
-const ASSOCIATED_TOKEN_PROGRAM = new PublicKey('ATokenGPvbdGVxr1b2hvZ9zbHQBhL1v8Tq9GZy3s3pVm');
+// The SDK labels the executing transaction "execute-wallet-transfer+reclaim-proof-rent".
+export const EXECUTE_LABEL = 'execute-wallet-transfer';
 // Each send reimburses the fee key from the wallet (12 transactions x 5,000 lamports
 // plus a small margin), so its float stays topped up.
 export const FEE_REFUND_LAMPORTS = 65000n;
 // Float kept on the fee key: one proof account's rent (refunded after each send) plus fees.
 export const FEE_FLOAT_LAMPORTS = 70000000n;
+// Fee-key SOL above the float is offered for moving into the wallet from this amount on.
+export const SWEEP_MINIMUM_LAMPORTS = 10000000n;
+// An approval must stay valid at least this many slots (about a minute) after signing.
+export const APPROVE_MARGIN_SLOTS = 150n;
+// Finished sends kept in the journal; unfinished ones are never dropped.
+export const MAX_FINISHED_SENDS = 200;
+export const SUPERSEDED_TEXT = 'Not sent: the wallet moved on, so this approval can no longer execute.';
+export const EXPIRED_TEXT = 'Not sent: this approval expired before it could run.';
+
+const FINISHED = ['done', 'superseded', 'expired'];
+const UNFINISHED_SIGNED = ['signed', 'submitting', 'failed', 'uncertain'];
+const sendKey = (id) => `${SEND_PREFIX}${id}`;
+export const isSendKey = (key) => key.startsWith(SEND_PREFIX);
 
 // Polls signature status instead of relying on a WebSocket subscription, which some
-// RPC providers restrict. Fails closed with the signature if the blockhash expires.
-export async function confirmByPolling(connection, signature, lastValidBlockHeight, commitment) {
+// RPC providers restrict. Fails closed with the signature if the blockhash expires or the
+// deadline passes.
+export async function confirmByPolling(connection, signature, lastValidBlockHeight, commitment, timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
     const status = (
       await connection.getSignatureStatuses([signature], { searchTransactionHistory: true })
@@ -50,6 +75,7 @@ export async function confirmByPolling(connection, signature, lastValidBlockHeig
       return status;
     if (!status && (await connection.getBlockHeight(commitment)) > lastValidBlockHeight)
       throw new Error(`Transaction expired without confirmation: ${signature}`);
+    if (Date.now() > deadline) throw new Error(`Confirmation deadline exceeded: ${signature}`);
     await new Promise((r) => setTimeout(r, commitment === 'confirmed' ? 400 : 1500));
   }
 }
@@ -61,11 +87,62 @@ export function lamportsToSol(value) {
   return frac ? `${whole}.${frac}` : `${whole}`;
 }
 
-export function createWalletService({ vault, storage, fetchImpl = globalThis.fetch.bind(globalThis) }) {
+// The signature of this send's own confirmed, successful execute transaction, if any.
+export function executeSignature(record) {
+  const own = record.records?.find(
+    (r) => r.phase === 'confirmed' && r.label.includes(EXECUTE_LABEL) && !r.error,
+  );
+  return own?.signature ?? record.executeSignature ?? null;
+}
+// True once any transaction that opens this send's proof account may have been sent.
+function mayHaveProof(record) {
+  return (record.records ?? []).some((r) => r.label.includes('begin-proof'));
+}
+// Sends that will never execute through their own proof, but whose proof deposit may
+// still sit in a proof account.
+export function needsReclaim(record) {
+  const abandoned =
+    ['superseded', 'expired', 'discarded'].includes(record.status) ||
+    (record.status === 'done' && record.executedElsewhere);
+  return abandoned && record.reclaimed !== true && mayHaveProof(record);
+}
+// Does this confirmed transaction execute exactly this intent with the wallet program?
+export function executesIntent(tx, program, intentHex) {
+  const message = tx?.transaction?.message;
+  if (!message) return false;
+  const keys = message.staticAccountKeys ?? message.accountKeys ?? [];
+  return (message.compiledInstructions ?? []).some((ix) => {
+    const id = keys[ix.programIdIndex];
+    const data = Uint8Array.from(ix.data ?? []);
+    return id?.toBase58?.() === program && data[0] === 5 && hex(data.subarray(2)) === intentHex;
+  });
+}
+function parseAddress(value, what = 'address') {
+  try {
+    return new PublicKey(String(value ?? '').trim());
+  } catch {
+    throw new Error(what === 'address' ? 'That is not a valid Solana address.' : `That is not a valid ${what}.`);
+  }
+}
+// The token account to send from: the wallet's associated token account when it holds
+// enough, otherwise the account with the largest balance.
+export function pickTokenSource(accounts, associated, needed) {
+  const largest = accounts.reduce((a, b) => (b.amount > a.amount ? b : a));
+  const preferred = accounts.find((a) => a.address === associated);
+  return preferred && needed !== null && preferred.amount >= needed ? preferred : largest;
+}
+const label = (cluster) => BUILT_IN[cluster]?.label ?? cluster;
+
+export function createWalletService({
+  vault,
+  storage,
+  fetchImpl = globalThis.fetch?.bind(globalThis),
+  // For tests: (config) => connection. Defaults to a web3.js Connection.
+  connect,
+}) {
   let cached = null;
 
   async function settings() {
-    const { mergeSettings } = await import('./networks.js');
     return mergeSettings((await storage.local.get(SETTINGS_KEY))[SETTINGS_KEY]);
   }
   async function session() {
@@ -74,38 +151,222 @@ export function createWalletService({ vault, storage, fetchImpl = globalThis.fet
     const config = networkConfig(deployment);
     const key = JSON.stringify(config);
     if (cached?.key === key) return cached.value;
-    const connection = new Connection(config.rpc, {
-      commitment: config.cluster === 'localnet' ? 'confirmed' : 'finalized',
-      disableRetryOnRateLimit: true,
-      fetch: rateLimitedFetch(fetchImpl),
-    });
+    const connection = connect
+      ? connect(config)
+      : new Connection(config.rpc, {
+          commitment: config.cluster === 'localnet' ? 'confirmed' : 'finalized',
+          disableRetryOnRateLimit: true,
+          fetch: rateLimitedFetch(fetchImpl),
+        });
     const network = await openNetwork(config, connection);
     cached = { key, value: { network, connection, deployment, settings: s } };
     return cached.value;
   }
-  async function descriptor() {
-    const { network, deployment } = await session();
+  async function ownerInfo() {
     const info = await vault.publicInfo();
     if (!info) throw new Error('No wallet in this browser profile.');
-    const existing = info.descriptors[deployment.cluster];
-    if (existing && existing.program === network.program && existing.genesis === network.genesis)
-      return existing;
-    const created = await createDescriptor({
-      program: network.program,
-      genesis: network.genesis,
-      policy: { keys: [info.ownerPublicKey], threshold: 1 },
-    });
-    await vault.setDescriptor(deployment.cluster, created);
+    return info;
+  }
+  // The wallet for the current deployment. A stored descriptor is used only after it is
+  // rebuilt from its salt and the vault's own key; otherwise a new one is derived from the
+  // key (deterministic salt) and added next to any earlier deployment's descriptor.
+  async function descriptor() {
+    const { network, deployment } = await session();
+    const info = await ownerInfo();
+    const list = info.descriptors[deployment.cluster] ?? [];
+    const stored = list.find((d) => d.program === network.program && d.genesis === network.genesis);
+    if (stored) return verifyOwnDescriptor(stored, info.ownerPublicKey, `stored ${deployment.label}`);
+    const created = await ownDescriptor(info.ownerPublicKey, network.program, network.genesis);
+    await vault.addDescriptor(deployment.cluster, created);
     return created;
   }
-  async function sends() {
-    return (await storage.local.get(SENDS_KEY))[SENDS_KEY] ?? {};
+  // walletStatus, plus: an initialized wallet's live policy must be the vault key alone.
+  async function ownStatus(network, d) {
+    const info = await ownerInfo();
+    const status = await walletStatus(network, d);
+    if (status.initialized) verifyOwnState(status.state, info.ownerPublicKey);
+    return status;
+  }
+
+  // ---- Journal ----
+  async function migrate() {
+    if (!(await storage.local.get(LEGACY_SENDS_KEY))[LEGACY_SENDS_KEY]) return;
+    await withLock('journal-migrate', async () => {
+      const legacy = (await storage.local.get(LEGACY_SENDS_KEY))[LEGACY_SENDS_KEY];
+      if (!legacy) return;
+      const entries = Object.fromEntries(Object.values(legacy).map((r) => [sendKey(r.id), r]));
+      if (Object.keys(entries).length) await storage.local.set(entries);
+      await storage.local.remove(LEGACY_SENDS_KEY);
+    });
+  }
+  async function allSends() {
+    await migrate();
+    const all = await storage.local.get(null);
+    return Object.entries(all)
+      .filter(([k]) => isSendKey(k))
+      .map(([, v]) => v);
+  }
+  async function getSend(id) {
+    await migrate();
+    return (await storage.local.get(sendKey(id)))[sendKey(id)] ?? null;
   }
   async function saveSend(record) {
-    const all = await sends();
-    all[record.id] = record;
-    await storage.local.set({ [SENDS_KEY]: all });
+    await storage.local.set({ [sendKey(record.id)]: record });
     return record;
+  }
+  async function removeSend(id) {
+    await storage.local.remove(sendKey(id));
+  }
+  // Keeps the newest MAX_FINISHED_SENDS finished sends. Unfinished sends, and finished
+  // ones whose proof deposit is still open, are never dropped.
+  async function prune() {
+    const finished = (await allSends())
+      .filter((r) => FINISHED.includes(r.status) && !needsReclaim(r))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const drop = finished.slice(MAX_FINISHED_SENDS).map((r) => sendKey(r.id));
+    if (drop.length) await storage.local.remove(drop);
+  }
+  function finish(record, status, extra = {}) {
+    Object.assign(record, { status, error: null, ...extra });
+    // A finished send can never be resumed; its approval (about 10 KB) is no longer needed.
+    if (FINISHED.includes(status) || status === 'discarded') record.approval = null;
+    return record;
+  }
+
+  // A send runs only on the network and wallet it was prepared for.
+  async function sendContext(record) {
+    const s = await session();
+    const d = await descriptor();
+    if (record.cluster !== s.deployment.cluster)
+      throw new Error(
+        `This send was prepared on ${label(record.cluster)}. Switch the network to ${label(record.cluster)} to continue it.`,
+      );
+    if (record.wallet !== d.wallet || (record.program && record.program !== s.network.program))
+      throw new Error(
+        `This send belongs to a different ${label(record.cluster)} wallet (another deployment). It cannot be continued with the current settings.`,
+      );
+    return { ...s, d };
+  }
+
+  // Search the wallet's recent history for a transaction that executed this exact intent
+  // (execute is permissionless once a proof is verified, so anyone holding the uploaded
+  // signature could have run it).
+  async function findExecution(network, record) {
+    // The signature is public only once one of this send's upload transactions was sent.
+    if (!record.records.some((r) => r.phase === 'prepared')) return null;
+    const { connection, commitment } = network;
+    const since = Date.parse(record.createdAt) / 1000 - 300;
+    const own = new Set(record.records.filter((r) => !r.label.includes(EXECUTE_LABEL)).map((r) => r.signature));
+    const list = await connection.getSignaturesForAddress(new PublicKey(record.wallet), { limit: 200 }, commitment);
+    for (const s of list) {
+      if (s.blockTime && Number(s.blockTime) < since) break;
+      if (s.err || own.has(s.signature)) continue;
+      const tx = await connection.getTransaction(s.signature, { commitment, maxSupportedTransactionVersion: 0 });
+      if (tx && !tx.meta?.err && executesIntent(tx, network.program, record.intentHex)) return s.signature;
+    }
+    return null;
+  }
+
+  // Decides what happened to a signed send that did not (or may not) finish, from
+  // evidence only: its own execute transaction, or the wallet's nonce and history.
+  async function settle(record, network, d) {
+    const own = executeSignature(record);
+    if (own) return finish(record, 'done', { executeSignature: own, reclaimed: true });
+    const { connection, commitment } = network;
+    const prepared = record.records.filter((r) => r.phase === 'prepared' && r.label.includes(EXECUTE_LABEL));
+    if (prepared.length) {
+      const statuses = (
+        await connection.getSignatureStatuses(
+          prepared.map((r) => r.signature),
+          { searchTransactionHistory: true },
+        )
+      ).value;
+      const i = statuses.findIndex(
+        (s) =>
+          s &&
+          !s.err &&
+          (s.confirmationStatus === 'finalized' || (commitment === 'confirmed' && s.confirmationStatus === 'confirmed')),
+      );
+      // The execute transaction also closed this send's proof account.
+      if (i >= 0) return finish(record, 'done', { executeSignature: prepared[i].signature, reclaimed: true });
+    }
+    const status = await walletStatus(network, d);
+    if (!status.initialized) return record;
+    const intent = decodeIntent(fromHex(record.intentHex));
+    if (status.state.nonce !== intent.nonce || status.state.epoch !== intent.epoch) {
+      const found = await findExecution(network, record);
+      if (found) return finish(record, 'done', { executeSignature: found, executedElsewhere: true });
+      return finish(record, 'superseded', { error: SUPERSEDED_TEXT });
+    }
+    const slot = BigInt(await connection.getSlot(commitment));
+    if (intent.expiry < slot) return finish(record, 'expired', { error: EXPIRED_TEXT });
+    return record;
+  }
+
+  // Closes this send's proof account (created by the fee key) and returns its rent to
+  // the fee key. Safe at any stage: the program lets the uploader close its own proof.
+  async function reclaim(record, network) {
+    if (!mayHaveProof(record)) {
+      record.reclaimed = true;
+      return record;
+    }
+    const payer = await vault.feeKeypair();
+    const digest = intentDigest(fromHex(record.intentHex));
+    const { proof } = await deriveProof(network.program, record.wallet, digest, 0, payer.publicKey);
+    const account = await network.connection.getAccountInfo(proof, network.commitment);
+    if (account && account.owner.toBase58() === network.program) {
+      const receipt = await submit(
+        network.connection,
+        payer,
+        [closeProofInstruction({ program: network.program, proof, uploader: payer.publicKey })],
+        {
+          network,
+          label: 'close-proof',
+          onRecord: async (event) => {
+            record.records.push(event);
+            await saveSend(record);
+          },
+        },
+      );
+      record.reclaimSignature = receipt.signature;
+      record.reclaimedLamports = String(account.lamports);
+    }
+    record.reclaimed = true;
+    record.reclaimError = null;
+    return record;
+  }
+  async function tryReclaim(record, network) {
+    try {
+      await reclaim(record, network);
+    } catch (error) {
+      record.reclaimError = errorText(error);
+    }
+  }
+
+  // Moves fee-key SOL above the float into the (initialized) wallet.
+  async function sweepFeeKey(keepLamports) {
+    const { network, connection } = await session();
+    const d = await descriptor();
+    const status = await ownStatus(network, d);
+    if (!status.initialized) throw new Error('Create the wallet first.');
+    const payer = await vault.feeKeypair();
+    const balance = BigInt(await connection.getBalance(payer.publicKey, network.commitment));
+    const latest = await connection.getLatestBlockhash(network.commitment);
+    const transfer = (lamports) =>
+      new Transaction({ feePayer: payer.publicKey, recentBlockhash: latest.blockhash }).add(
+        SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: new PublicKey(d.wallet), lamports }),
+      );
+    const quoted = (await connection.getFeeForMessage(transfer(1n).compileMessage(), network.commitment))?.value;
+    const fee = quoted === null || quoted === undefined ? 5000n : BigInt(quoted);
+    if (balance <= keepLamports + fee) return { sweptLamports: 0n, sweepSignature: null };
+    const swept = balance - keepLamports - fee;
+    const tx = transfer(swept);
+    await tx.sign(payer);
+    const sweepSignature = await connection.sendRawTransaction(await tx.serialize(), {
+      preflightCommitment: network.commitment,
+    });
+    await confirmByPolling(connection, sweepSignature, latest.lastValidBlockHeight, network.commitment);
+    return { sweptLamports: swept, sweepSignature };
   }
 
   return {
@@ -121,8 +382,8 @@ export function createWalletService({ vault, storage, fetchImpl = globalThis.fet
     async overview() {
       const { network, connection, deployment } = await session();
       const d = await descriptor();
-      const info = await vault.publicInfo();
-      const status = await walletStatus(network, d);
+      const info = await ownerInfo();
+      const status = await ownStatus(network, d);
       const feePayer = new PublicKey(info.feePayer);
       const feeLamports = BigInt(await connection.getBalance(feePayer, network.commitment));
       const tokens = [];
@@ -144,110 +405,144 @@ export function createWalletService({ vault, storage, fetchImpl = globalThis.fet
           });
         }
       }
+      // Wallets of earlier deployments on this network (e.g. before a re-pin) that still
+      // hold SOL: they stay listed so their funds are not forgotten.
+      const otherWallets = [];
+      for (const other of info.descriptors[deployment.cluster] ?? []) {
+        if (other.wallet === d.wallet || other.genesis !== network.genesis) continue;
+        try {
+          await verifyOwnDescriptor(other, info.ownerPublicKey);
+        } catch {
+          continue;
+        }
+        const lamports = BigInt(await connection.getBalance(new PublicKey(other.wallet), network.commitment));
+        if (lamports > 0n) otherWallets.push({ wallet: other.wallet, program: other.program, lamports });
+      }
       const cost = await executionCost(network, 1);
+      const sweepable =
+        status.initialized && feeLamports >= FEE_FLOAT_LAMPORTS + SWEEP_MINIMUM_LAMPORTS
+          ? feeLamports - FEE_FLOAT_LAMPORTS
+          : 0n;
       return {
         cluster: deployment.cluster,
         label: deployment.label,
+        isTestNetwork: deployment.cluster !== 'mainnet-beta',
         wallet: d.wallet,
         initialized: status.initialized,
         balanceLamports: status.balanceLamports,
         availableLamports: status.availableLamports,
         reserveLamports: status.reserveLamports,
+        // A SOL send also moves the fee refill out of the wallet.
+        maxSendableLamports:
+          status.availableLamports > FEE_REFUND_LAMPORTS ? status.availableLamports - FEE_REFUND_LAMPORTS : 0n,
         feePayer: info.feePayer,
         feeLamports,
         // Enough for one proof account plus fees; below this a send cannot start.
         feeNeededLamports: cost.requiredPayerLamports,
+        // Fee-key SOL above the float, e.g. left over from an interrupted setup.
+        sweepableLamports: sweepable,
+        otherWallets,
         tokens,
       };
     },
 
-    // One-address onboarding: the user funds the fee key once; this creates the
-    // wallet account and moves everything above the fee float into the wallet.
+    // One-address onboarding: the user funds the fee key once; this creates the wallet
+    // account and moves everything above the fee float into the wallet. Resumable: an
+    // already-created wallet is not created again, and only the sweep runs.
     async setupWallet({ keepLamports = FEE_FLOAT_LAMPORTS } = {}) {
-      const { network, connection } = await session();
+      const { network } = await session();
       const d = await descriptor();
       const payer = await vault.feeKeypair();
       const init = await initializeWallet(network, payer, d);
-      const balance = BigInt(await connection.getBalance(payer.publicKey, network.commitment));
-      const fee = 5000n;
-      let swept = 0n,
-        sweepSignature = null;
-      if (balance > keepLamports + fee) {
-        swept = balance - keepLamports - fee;
-        const latest = await connection.getLatestBlockhash(network.commitment);
-        const tx = new Transaction({ feePayer: payer.publicKey, recentBlockhash: latest.blockhash });
-        tx.add(
-          SystemProgram.transfer({
-            fromPubkey: payer.publicKey,
-            toPubkey: new PublicKey(d.wallet),
-            lamports: swept,
-          }),
+      await ownStatus(network, d);
+      let sweep;
+      try {
+        sweep = await sweepFeeKey(keepLamports);
+      } catch (error) {
+        if (init.alreadyInitialized) throw error;
+        throw new Error(
+          `Wallet created; moving your SOL into it failed (${errorText(error)}). Use “Move to wallet” on Home to try again.`,
         );
-        await tx.sign(payer);
-        sweepSignature = await connection.sendRawTransaction(await tx.serialize(), {
-          preflightCommitment: network.commitment,
-        });
-        await confirmByPolling(connection, sweepSignature, latest.lastValidBlockHeight, network.commitment);
       }
       return {
         initialized: !init.alreadyInitialized,
         initializeSignature: init.receipt?.signature ?? null,
-        sweptLamports: swept,
-        sweepSignature,
+        ...sweep,
       };
+    },
+    // Moves fee-key SOL above the float into the wallet (after an interrupted setup, or
+    // SOL sent to the fee address later).
+    async sweepExcess({ keepLamports = FEE_FLOAT_LAMPORTS } = {}) {
+      return sweepFeeKey(keepLamports);
     },
 
     async prepareSend({ asset = 'SOL', to, amount, mint }) {
       const { network, connection } = await session();
       const d = await descriptor();
-      const info = await vault.publicInfo();
+      const info = await ownerInfo();
+      const recipient = parseAddress(to);
+      const status = await ownStatus(network, d);
+      if (!status.initialized) throw new Error('Create the wallet first.');
+      // A send needs one proof deposit plus fees on the fee key; say so before signing.
+      const cost = await executionCost(network, 1);
+      const feeLamports = BigInt(await connection.getBalance(new PublicKey(info.feePayer), network.commitment));
+      if (feeLamports < cost.requiredPayerLamports)
+        throw new Error(
+          `Your fee address needs ${lamportsToSol(cost.requiredPayerLamports - feeLamports)} SOL more before you can send. Send SOL to ${info.feePayer}, then try again.`,
+        );
       const feeRefund = { to: info.feePayer, lamports: FEE_REFUND_LAMPORTS };
       let prepared, display;
       if (asset === 'SOL') {
-        prepared = await prepareSolTransfer(network, d, { to, amount, feeRefund });
-        display = { asset: 'SOL', amount, to };
+        prepared = await prepareSolTransfer(network, d, { to: recipient.toBase58(), amount, feeRefund });
+        display = { asset: 'SOL', amount, to: recipient.toBase58() };
       } else {
-        const owner = new PublicKey(d.wallet),
-          recipient = new PublicKey(to),
-          mintKey = new PublicKey(mint);
-        const ata = async (who) =>
-          (
-            await PublicKey.findProgramAddress(
-              [who.toBytes(), TOKEN_PROGRAM.toBytes(), mintKey.toBytes()],
-              ASSOCIATED_TOKEN_PROGRAM,
-            )
-          )[0];
+        if (!mint) throw new Error('Choose a token to send.');
+        const mintKey = parseAddress(mint, 'token mint address');
         const parsed = await connection.getParsedTokenAccountsByOwner(
-          owner,
+          new PublicKey(d.wallet),
           { mint: mintKey },
           network.commitment,
         );
-        const source = parsed.value[0]?.pubkey;
-        if (!source) throw new Error('This wallet holds no account for that token.');
-        const destination = await ata(recipient);
-        if (!(await connection.getAccountInfo(destination, network.commitment)))
+        const accounts = parsed.value.map(({ pubkey, account }) => ({
+          address: pubkey.toBase58(),
+          amount: BigInt(account.data.parsed?.info?.tokenAmount?.amount ?? '0'),
+          decimals: account.data.parsed?.info?.tokenAmount?.decimals,
+        }));
+        if (!accounts.length) throw new Error('This wallet holds no account for that token.');
+        let needed = null;
+        try {
+          needed = parseUnits(String(amount), accounts[0].decimals ?? 0);
+        } catch {
+          /* the SDK reports the amount problem below */
+        }
+        const source = pickTokenSource(accounts, await tokenAccountFor(d.wallet, mintKey.toBase58()), needed);
+        const destination = await tokenAccountFor(recipient.toBase58(), mintKey.toBase58());
+        if (!(await connection.getAccountInfo(new PublicKey(destination), network.commitment)))
           throw new Error(
             'The recipient has no account for this token yet. Ask them to create one, then send again.',
           );
         prepared = await prepareTokenTransfer(network, d, {
-          source: source.toBase58(),
-          mint,
-          destination: destination.toBase58(),
+          source: source.address,
+          mint: mintKey.toBase58(),
+          destination,
           amount,
           feeRefund,
         });
-        display = { asset: mint, amount, to, decimals: prepared.decimals };
+        display = { asset: mintKey.toBase58(), amount, to: recipient.toBase58(), decimals: prepared.decimals };
       }
       const intent = decodeIntent(prepared.bytes);
-      const cost = await executionCost(network, 1);
       const id = hex(globalThis.crypto.getRandomValues(new Uint8Array(12)));
       return saveSend({
         id,
         cluster: network.cluster,
+        program: network.program,
+        genesis: network.genesis,
         wallet: d.wallet,
+        feePayer: info.feePayer,
         createdAt: new Date().toISOString(),
         status: 'review',
         intentHex: hex(prepared.bytes),
+        digest: hex(intentDigest(prepared.bytes)),
         display,
         nonce: intent.nonce.toString(),
         expiry: intent.expiry.toString(),
@@ -259,66 +554,98 @@ export function createWalletService({ vault, storage, fetchImpl = globalThis.fet
       });
     },
 
-    // Signing happens only from the review window after the user approves the decoded intent.
-    async approve(id) {
-      const all = await sends();
-      const record = all[id];
-      if (!record || record.status !== 'review') throw new Error('Nothing to approve.');
-      const secret = await vault.ownerSecret();
-      try {
-        const bytes = Uint8Array.from(record.intentHex.match(/../g).map((h) => parseInt(h, 16)));
-        record.approval = signApproval(bytes, secret, 0);
-      } finally {
-        secret.fill(0);
-      }
-      record.status = 'signed';
-      return saveSend(record);
+    // Signing happens only from the review window, after the user approved what it showed.
+    // shownDigest is the digest of the intent bytes the window decoded and displayed; the
+    // stored bytes are decoded again here and every field the wallet controls is checked.
+    async approve(id, shownDigest) {
+      return withLock(`send:${id}`, async () => {
+        const record = await getSend(id);
+        if (!record) throw new Error('This send no longer exists.');
+        if (record.status !== 'review') throw new Error('This send was already approved or closed.');
+        const bytes = fromHex(record.intentHex);
+        if (!shownDigest || shownDigest !== hex(intentDigest(bytes)))
+          throw new Error(
+            'The transfer changed after this review window opened. Nothing was signed. Close it and review the send again.',
+          );
+        const { network, d } = await sendContext(record);
+        const info = await ownerInfo();
+        const intent = decodeIntent(bytes);
+        const view = describeIntent(intent, { cluster: record.cluster });
+        const problems = [...view.problems];
+        if (view.wallet !== d.wallet) problems.push('It spends from a wallet that is not yours.');
+        if (view.program !== network.program || view.genesis !== network.genesis)
+          problems.push('It is for another program or network.');
+        if (!view.fee || view.fee.to !== info.feePayer || view.fee.lamports > FEE_REFUND_LAMPORTS)
+          problems.push('Its fee refill does not go to your own fee address, or is larger than expected.');
+        if (problems.length)
+          throw new Error(`This approval does not match your wallet. ${problems.join(' ')} Nothing was signed.`);
+        const status = await ownStatus(network, d);
+        if (!status.initialized || status.state.nonce !== intent.nonce || status.state.epoch !== intent.epoch) {
+          await saveSend(finish(record, 'expired', { error: 'Not signed: the wallet has sent something else since this review was prepared.' }));
+          throw new Error('This review is out of date: the wallet has sent something else since. Nothing was signed. Prepare the send again.');
+        }
+        const slot = BigInt(await network.connection.getSlot(network.commitment));
+        if (intent.expiry <= slot + APPROVE_MARGIN_SLOTS) {
+          await saveSend(finish(record, 'expired', { error: 'Not signed: this review expired before it was approved.' }));
+          throw new Error('This review expired before you approved it. Nothing was signed. Prepare the send again.');
+        }
+        const secret = await vault.ownerSecret();
+        try {
+          record.approval = signApproval(bytes, secret, 0);
+        } finally {
+          secret.fill(0);
+        }
+        record.status = 'signed';
+        record.signedAt = new Date().toISOString();
+        return saveSend(record);
+      });
     },
 
+    // Runs (or resumes) a signed send. Waits if another page is running it; that run's
+    // outcome is then returned.
     async execute(id, onProgress = () => {}) {
-      const { network } = await session();
-      const d = await descriptor();
-      const all = await sends();
-      const record = all[id];
-      if (!record?.approval) throw new Error('Send is not signed.');
-      if (record.status === 'done') return record;
-      const payer = await vault.feeKeypair();
-      record.status = 'submitting';
-      record.error = null;
-      await saveSend(record);
-      const onRecord = async (event) => {
-        record.records.push(event);
+      return withLock(`send:${id}`, async () => {
+        const record = await getSend(id);
+        if (!record) throw new Error('This send no longer exists.');
+        if (FINISHED.includes(record.status) || record.status === 'discarded') return record;
+        if (!record.approval) throw new Error('Send is not signed.');
+        const { network, d } = await sendContext(record);
+        const payer = await vault.feeKeypair();
+        record.status = 'submitting';
+        record.error = null;
         await saveSend(record);
-        onProgress(event, record);
-      };
-      try {
-        const result = await executeApprovals(network, payer, d, [record.approval], { onRecord });
-        record.status = 'done';
-        record.cleanupErrors = result.cleanupErrors;
-      } catch (error) {
-        record.error = error.message;
-        record.uncertainSignature = error.signature ?? null;
-        record.status = error.name === 'SubmissionUncertain' ? 'uncertain' : 'failed';
-        // A send whose nonce has already advanced was executed (possibly by an
-        // earlier attempt); report it as done instead of a failure.
+        const onRecord = async (event) => {
+          record.records.push(event);
+          await saveSend(record);
+          onProgress(event, record);
+        };
         try {
-          const status = await walletStatus(network, d);
-          if (status.initialized && status.state.nonce > BigInt(record.nonce)) {
-            record.status = 'done';
-            record.error = null;
+          const result = await executeApprovals(network, payer, d, [record.approval], { onRecord });
+          // The execute transaction closed the proof account and refunded its rent.
+          finish(record, 'done', { executeSignature: result.receipt.signature, reclaimed: true });
+          record.cleanupErrors = result.cleanupErrors;
+        } catch (error) {
+          record.error = error.message;
+          record.uncertainSignature = error.signature ?? null;
+          record.status = error.name === 'SubmissionUncertain' ? 'uncertain' : 'failed';
+          try {
+            await settle(record, network, d);
+          } catch {
+            /* keep the original error */
           }
-        } catch {
-          /* keep the original error */
         }
-      }
-      return saveSend(record);
+        if (needsReclaim(record)) await tryReclaim(record, network);
+        await saveSend(record);
+        await prune();
+        return record;
+      });
     },
 
     // For "uncertain" sends: look up the recorded signature before anything is retried.
     async checkUncertain(id) {
-      const { connection } = await session();
-      const record = (await sends())[id];
+      const record = await getSend(id);
       if (!record?.uncertainSignature) return null;
+      const { connection } = await sendContext(record);
       const status = (
         await connection.getSignatureStatuses([record.uncertainSignature], {
           searchTransactionHistory: true,
@@ -329,22 +656,94 @@ export function createWalletService({ vault, storage, fetchImpl = globalThis.fet
         : { found: false };
     },
 
+    // Popup open: settle signed sends nobody is running (another page holding a send's
+    // lock is running it) and close the proof accounts of sends that will never execute,
+    // so their deposits return to the fee key. Only sends of the current network and
+    // wallet are touched. Returns how many deposits were reclaimed.
+    async reclaimAbandoned() {
+      const { network, deployment } = await session();
+      const d = await descriptor();
+      let reclaimed = 0,
+        slot = null;
+      for (const candidate of await allSends()) {
+        if (candidate.cluster !== deployment.cluster || candidate.wallet !== d.wallet) continue;
+        // A review window closed without a decision: once its intent expires, say so.
+        if (candidate.status === 'review') {
+          slot ??= BigInt(await network.connection.getSlot(network.commitment));
+          if (BigInt(candidate.expiry) < slot)
+            await withLock(`send:${candidate.id}`, async () => {
+              const record = await getSend(candidate.id);
+              if (record?.status === 'review')
+                await saveSend(finish(record, 'expired', { error: 'Not signed: this review expired before it was approved.' }));
+            }, { ifAvailable: true }).catch(() => {});
+          continue;
+        }
+        if (!UNFINISHED_SIGNED.includes(candidate.status) && !needsReclaim(candidate)) continue;
+        try {
+          await withLock(
+            `send:${candidate.id}`,
+            async () => {
+              const record = await getSend(candidate.id);
+              if (!record) return;
+              if (UNFINISHED_SIGNED.includes(record.status) && record.approval) await settle(record, network, d);
+              if (needsReclaim(record)) {
+                await tryReclaim(record, network);
+                if (record.reclaimSignature && record.reclaimed) reclaimed++;
+                if (record.status === 'discarded' && record.reclaimed) return removeSend(record.id);
+              }
+              await saveSend(record);
+            },
+            { ifAvailable: true },
+          );
+        } catch (error) {
+          if (!(error instanceof LockBusy)) throw error;
+        }
+      }
+      await prune();
+      return { reclaimed };
+    },
+
     async listSends() {
-      return Object.values(await sends()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      return (await allSends()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     },
-    async getSend(id) {
-      return (await sends())[id] ?? null;
-    },
+    getSend,
+    // Review: delete. Finished: remove from the list. Signed but not finished: closes its
+    // proof account first (returning the deposit), then removes it. While a page is
+    // running the send, or its outcome is unknown, it cannot be discarded.
     async discardSend(id) {
-      const all = await sends();
-      if (all[id] && ['review', 'failed', 'done'].includes(all[id].status)) delete all[id];
-      await storage.local.set({ [SENDS_KEY]: all });
+      return withLock(
+        `send:${id}`,
+        async () => {
+          const record = await getSend(id);
+          if (!record) return null;
+          if (record.status === 'review' || (FINISHED.includes(record.status) && !needsReclaim(record))) {
+            await removeSend(id);
+            return null;
+          }
+          if (['submitting', 'uncertain'].includes(record.status))
+            throw new Error('This send may still be on its way. Check its status or resume it before discarding it.');
+          record.discardedFrom ??= record.status;
+          finish(record, 'discarded', { error: record.error });
+          await saveSend(record);
+          try {
+            const { network } = await sendContext(record);
+            await reclaim(record, network);
+          } catch (error) {
+            record.reclaimError = errorText(error);
+          }
+          if (!needsReclaim(record)) {
+            await removeSend(id);
+            return null;
+          }
+          // Kept until its deposit is reclaimed (retried when the popup opens).
+          return saveSend(record);
+        },
+        { ifAvailable: true, busyMessage: 'This send is running in another window.' },
+      );
     },
     parseUnits,
     LAMPORTS_PER_SOL,
     PROOF_BYTES,
-    closeProofInstruction,
-    submit,
     parseApproval,
   };
 }

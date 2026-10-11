@@ -1,0 +1,354 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { Keypair, PublicKey, Transaction } from '@solana/web3.js';
+import { createDescriptor } from 'quantum-seal-wallet/wallet';
+import { generateKeypair } from 'quantum-seal-wallet/approval';
+import { decodeIntent, encodeIntent, intentDigest, deriveProof, hex, fromHex } from 'quantum-seal-wallet/codec';
+import { executeInstruction } from 'quantum-seal-wallet/instructions';
+import { createVaultStore } from '../src/vault.js';
+import { deterministicSalt } from '../src/descriptors.js';
+import {
+  createWalletService,
+  pickTokenSource,
+  executesIntent,
+  SUPERSEDED_TEXT,
+  EXPIRED_TEXT,
+  FEE_FLOAT_LAMPORTS,
+  MAX_FINISHED_SENDS,
+} from '../src/wallet-service.js';
+import { fakeStorage } from './support/fake-storage.mjs';
+import { fakeChain } from './support/fake-chain.mjs';
+
+const pass = 'a long test passphrase';
+const key = async () => (await Keypair.generate()).publicKey.toBase58();
+const SOL = 1000000000n;
+
+async function setup({ wallet = true, feeLamports = FEE_FLOAT_LAMPORTS } = {}) {
+  const chain = await fakeChain();
+  const storage = fakeStorage();
+  await storage.local.set({ settings: chain.settings() });
+  const vault = createVaultStore(storage);
+  const created = await vault.create(pass);
+  const service = createWalletService({ vault, storage, connect: () => chain.connection });
+  const d = await service.descriptor();
+  if (wallet) await chain.setWallet(d);
+  chain.fund(created.feePayer, feeLamports);
+  return { chain, storage, vault, service, d, created };
+}
+const balance = (chain, address) => chain.connection.getBalance(new PublicKey(address));
+async function stored(storage, id) {
+  return (await storage.local.get(`send:${id}`))[`send:${id}`];
+}
+async function edit(storage, id, fn) {
+  const record = await stored(storage, id);
+  fn(record);
+  await storage.local.set({ [`send:${id}`]: record });
+  return record;
+}
+// A signed send whose upload was interrupted after its proof account was opened.
+async function interruptedSend(t) {
+  const record = await t.service.prepareSend({ to: await key(), amount: '0.01' });
+  await t.service.approve(record.id, record.digest);
+  const { proof } = await deriveProof(t.chain.program, t.d.wallet, intentDigest(fromHex(record.intentHex)), 0, new PublicKey(t.created.feePayer));
+  t.chain.openProof(proof);
+  await edit(t.storage, record.id, (r) => {
+    r.status = 'submitting';
+    r.records.push({ phase: 'prepared', label: 'begin-proof+upload-chunk', signature: 'upload-1' });
+  });
+  return { record, proof };
+}
+
+// ---- Finding 1 and 5: descriptors ----
+
+test('the wallet address is derived from the owner key, so a backup without descriptors recovers it', async () => {
+  const t = await setup();
+  assert.equal(t.d.salt, hex(deterministicSalt(t.created.ownerPublicKey, t.chain.genesis, t.chain.program)));
+  const backup = { ...(await t.vault.exportBackup()), descriptors: {} };
+  const storage = fakeStorage();
+  await storage.local.set({ settings: t.chain.settings() });
+  const vault = createVaultStore(storage);
+  await vault.importBackup(JSON.stringify(backup), pass);
+  const service = createWalletService({ vault, storage, connect: () => t.chain.connection });
+  assert.equal((await service.descriptor()).wallet, t.d.wallet);
+});
+
+test('an existing (random-salt) descriptor keeps working; a re-pin adds a wallet and keeps the old one visible', async () => {
+  const chain = await fakeChain();
+  const storage = fakeStorage();
+  await storage.local.set({ settings: chain.settings() });
+  const vault = createVaultStore(storage);
+  const created = await vault.create(pass);
+  const old = await createDescriptor({ program: chain.program, genesis: chain.genesis, policy: { keys: [created.ownerPublicKey], threshold: 1 } });
+  await vault.addDescriptor('localnet', old);
+  const service = createWalletService({ vault, storage, connect: () => chain.connection });
+  assert.equal((await service.descriptor()).wallet, old.wallet);
+  await chain.setWallet(old, { lamports: 3n * SOL });
+  // A release re-pins the network to another deployment.
+  const pins = await chain.deployAgain();
+  await storage.local.set({ settings: chain.settings({ deployments: { localnet: pins } }) });
+  const fresh = await service.descriptor();
+  assert.notEqual(fresh.wallet, old.wallet);
+  assert.deepEqual((await vault.publicInfo()).descriptors.localnet.map((d) => d.wallet), [old.wallet, fresh.wallet]);
+  const o = await service.overview();
+  assert.equal(o.wallet, fresh.wallet);
+  assert.deepEqual(o.otherWallets, [{ wallet: old.wallet, program: chain.program, lamports: 3n * SOL }]);
+});
+
+test('a stored descriptor tampered with after import is refused before use', async () => {
+  const t = await setup();
+  const attacker = hex(generateKeypair().publicKey);
+  const foreign = await createDescriptor({ program: t.chain.program, genesis: t.chain.genesis, policy: { keys: [t.created.ownerPublicKey, attacker], threshold: 1 } });
+  const v = await t.vault.vault();
+  await t.storage.local.set({ vault: { ...v, descriptors: { localnet: [foreign] } } });
+  await assert.rejects(t.service.descriptor(), /not controlled by your key alone/);
+  await assert.rejects(t.service.overview(), /not controlled by your key alone/);
+});
+
+test('a wallet whose on-chain owners are not the vault key alone is refused', async () => {
+  const t = await setup();
+  const attacker = hex(generateKeypair().publicKey);
+  await t.chain.setWallet(t.d, { policy: { keys: [t.created.ownerPublicKey, attacker], threshold: 1 } });
+  await assert.rejects(t.service.overview(), /on-chain owners are no longer just your key/);
+  await assert.rejects(t.service.prepareSend({ to: await key(), amount: '0.01' }), /on-chain owners/);
+  await t.chain.setWallet(t.d, { policy: { keys: [t.created.ownerPublicKey], threshold: 1, guardian: attacker, recoveryDelay: 300n } });
+  await assert.rejects(t.service.overview(), /on-chain owners/);
+});
+
+// ---- Finding 4, 9, 11: approve ----
+
+test('approve signs only the bytes the review showed', async () => {
+  const t = await setup();
+  const record = await t.service.prepareSend({ to: await key(), amount: '0.25' });
+  assert.equal(record.digest, hex(intentDigest(fromHex(record.intentHex))));
+  await assert.rejects(t.service.approve(record.id, '00'.repeat(32)), /changed after this review window opened/);
+  await assert.rejects(t.service.approve(record.id), /changed after/);
+  assert.equal((await stored(t.storage, record.id)).status, 'review');
+  const signed = await t.service.approve(record.id, record.digest);
+  assert.equal(signed.status, 'signed');
+  assert.equal(signed.approval.intent, record.intentHex);
+});
+
+test('approve refuses an intent whose fee refill, wallet or program differs, even when its digest is shown', async () => {
+  const t = await setup();
+  const record = await t.service.prepareSend({ to: await key(), amount: '0.25' });
+  const intent = decodeIntent(fromHex(record.intentHex));
+  const variants = [
+    { ...intent, fee: { to: await key(), lamports: 65000n } },
+    { ...intent, fee: { to: t.created.feePayer, lamports: 5000000n } },
+    { ...intent, fee: null },
+    { ...intent, wallet: new PublicKey(await key()) },
+    { ...intent, program: new PublicKey(await key()) },
+  ];
+  for (const v of variants) {
+    const bytes = encodeIntent(v);
+    await edit(t.storage, record.id, (r) => (r.intentHex = hex(bytes)));
+    await assert.rejects(t.service.approve(record.id, hex(intentDigest(bytes))), /does not match your wallet/);
+  }
+  assert.equal((await stored(t.storage, record.id)).approval, null);
+});
+
+test('approve refuses expired and out-of-date reviews, and non-canonical hex', async () => {
+  const t = await setup();
+  const a = await t.service.prepareSend({ to: await key(), amount: '0.25' });
+  t.chain.slot = BigInt(a.expiry) - 100n;
+  await assert.rejects(t.service.approve(a.id, a.digest), /expired before you approved it/);
+  assert.equal((await stored(t.storage, a.id)).status, 'expired');
+  t.chain.slot = 1000n;
+  const b = await t.service.prepareSend({ to: await key(), amount: '0.25' });
+  await t.chain.setWallet(t.d, { nonce: 1n });
+  await assert.rejects(t.service.approve(b.id, b.digest), /out of date/);
+  await t.chain.setWallet(t.d);
+  const c = await t.service.prepareSend({ to: await key(), amount: '0.25' });
+  await edit(t.storage, c.id, (r) => (r.intentHex = r.intentHex.toUpperCase()));
+  await assert.rejects(t.service.approve(c.id, c.digest), /canonical lowercase hexadecimal/);
+});
+
+test('a send is approved at most once, even from two windows at the same time', async () => {
+  const t = await setup();
+  const record = await t.service.prepareSend({ to: await key(), amount: '0.25' });
+  const results = await Promise.allSettled([t.service.approve(record.id, record.digest), t.service.approve(record.id, record.digest)]);
+  assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+  assert.match(results.find((r) => r.status === 'rejected').reason.message, /already approved/);
+});
+
+// ---- Finding 2 and 3: outcomes and proof deposits ----
+
+test('a send whose nonce moved on without its execute is "superseded", not done, and its deposit returns', async () => {
+  const t = await setup();
+  const { record, proof } = await interruptedSend(t);
+  const feeBefore = await balance(t.chain, t.created.feePayer);
+  const rent = (await t.chain.connection.getAccountInfo(proof)).lamports;
+  await t.chain.setWallet(t.d, { nonce: 1n }); // another send ran at this nonce
+  const result = await t.service.execute(record.id);
+  assert.equal(result.status, 'superseded');
+  assert.equal(result.error, SUPERSEDED_TEXT);
+  assert.equal(result.approval, null);
+  assert.equal(await t.chain.connection.getAccountInfo(proof), null);
+  assert.equal(await balance(t.chain, t.created.feePayer), feeBefore + rent - 5000n);
+  assert.ok(result.records.some((r) => r.label === 'close-proof' && r.phase === 'confirmed'));
+  // Nothing is retried for a superseded send.
+  assert.equal((await t.service.execute(record.id)).status, 'superseded');
+});
+
+test('a send whose intent was executed by someone else is done, and its own proof deposit still returns', async () => {
+  const t = await setup();
+  const { record, proof } = await interruptedSend(t);
+  const message = new Transaction({ feePayer: new PublicKey(await key()), recentBlockhash: await key() })
+    .add(executeInstruction(fromHex(record.intentHex), [new PublicKey(await key())]))
+    .compileMessage();
+  assert.equal(executesIntent({ transaction: { message } }, t.chain.program, record.intentHex), true);
+  assert.equal(executesIntent({ transaction: { message } }, await key(), record.intentHex), false);
+  t.chain.addHistory(t.d.wallet, message, 'elsewhere-signature');
+  await t.chain.setWallet(t.d, { nonce: 1n });
+  const result = await t.service.execute(record.id);
+  assert.equal(result.status, 'done');
+  assert.equal(result.executeSignature, 'elsewhere-signature');
+  assert.equal(result.executedElsewhere, true);
+  assert.equal(await t.chain.connection.getAccountInfo(proof), null);
+});
+
+test('a send is done only on evidence of its own confirmed execute transaction', async () => {
+  const t = await setup();
+  const { record } = await interruptedSend(t);
+  await edit(t.storage, record.id, (r) =>
+    r.records.push({ phase: 'confirmed', label: 'execute-wallet-transfer+reclaim-proof-rent', signature: 'exec-1', error: null }),
+  );
+  await t.chain.setWallet(t.d, { nonce: 1n });
+  const result = await t.service.execute(record.id);
+  assert.equal(result.status, 'done');
+  assert.equal(result.executeSignature, 'exec-1');
+});
+
+test('an approval that expired before it ran is "expired" and its deposit returns', async () => {
+  const t = await setup();
+  const { record, proof } = await interruptedSend(t);
+  t.chain.slot = BigInt(record.expiry) + 1n;
+  const result = await t.service.execute(record.id);
+  assert.equal(result.status, 'expired');
+  assert.equal(result.error, EXPIRED_TEXT);
+  assert.equal(await t.chain.connection.getAccountInfo(proof), null);
+});
+
+test('execute and checkUncertain refuse a send from another network or wallet', async () => {
+  const t = await setup();
+  const { record } = await interruptedSend(t);
+  await edit(t.storage, record.id, (r) => {
+    r.cluster = 'devnet';
+    r.uncertainSignature = 'sig';
+  });
+  await assert.rejects(t.service.execute(record.id), /prepared on Devnet\. Switch the network to Devnet/);
+  await assert.rejects(t.service.checkUncertain(record.id), /prepared on Devnet/);
+  const other = await key();
+  await edit(t.storage, record.id, (r) => {
+    r.cluster = 'localnet';
+    r.wallet = other;
+  });
+  await assert.rejects(t.service.execute(record.id), /different Local validator wallet/);
+  await t.chain.setWallet(t.d, { nonce: 5n });
+  await assert.rejects(t.service.execute(record.id), /different/);
+  assert.equal((await stored(t.storage, record.id)).status, 'submitting');
+});
+
+test('discarding a signed send that failed closes its proof and removes it', async () => {
+  const t = await setup();
+  const { record, proof } = await interruptedSend(t);
+  await edit(t.storage, record.id, (r) => (r.status = 'failed'));
+  await t.service.discardSend(record.id);
+  assert.equal(await stored(t.storage, record.id), undefined);
+  assert.equal(await t.chain.connection.getAccountInfo(proof), null);
+  // A send whose outcome is unknown cannot be discarded.
+  const second = await interruptedSend(t);
+  await edit(t.storage, second.record.id, (r) => (r.status = 'uncertain'));
+  await assert.rejects(t.service.discardSend(second.record.id), /may still be on its way/);
+});
+
+test('opening the popup settles abandoned sends and reclaims their deposits', async () => {
+  const t = await setup();
+  t.chain.fund(t.created.feePayer, 2n * FEE_FLOAT_LAMPORTS);
+  const a = await interruptedSend(t);
+  const b = await interruptedSend(t);
+  await edit(t.storage, a.record.id, (r) => (r.status = 'failed'));
+  await edit(t.storage, b.record.id, (r) => {
+    r.status = 'superseded';
+    r.approval = null;
+  });
+  // Another network's send is left alone.
+  const c = await interruptedSend(t);
+  await edit(t.storage, c.record.id, (r) => (r.cluster = 'devnet'));
+  await t.chain.setWallet(t.d, { nonce: 1n });
+  const { reclaimed } = await t.service.reclaimAbandoned();
+  assert.equal(reclaimed, 2);
+  assert.equal(await t.chain.connection.getAccountInfo(a.proof), null);
+  assert.equal(await t.chain.connection.getAccountInfo(b.proof), null);
+  assert.ok(await t.chain.connection.getAccountInfo(c.proof));
+  assert.equal((await stored(t.storage, a.record.id)).status, 'superseded');
+  assert.equal((await t.service.reclaimAbandoned()).reclaimed, 0);
+  // A review left open past its expiry is marked expired (nothing was signed).
+  await t.chain.setWallet(t.d, { nonce: 1n });
+  const review = await t.service.prepareSend({ to: await key(), amount: '0.01' });
+  t.chain.slot = BigInt(review.expiry) + 1n;
+  await t.service.reclaimAbandoned();
+  assert.equal((await stored(t.storage, review.id)).status, 'expired');
+});
+
+// ---- Lows ----
+
+test('a low fee key is reported before review, not after signing', async () => {
+  const t = await setup({ feeLamports: 1000000n });
+  await assert.rejects(
+    t.service.prepareSend({ to: await key(), amount: '0.25' }),
+    new RegExp(`fee address needs [0-9.]+ SOL more before you can send\\. Send SOL to ${t.created.feePayer}`),
+  );
+  await assert.rejects(t.service.prepareSend({ to: 'not-an-address', amount: '1' }), /not a valid Solana address/);
+});
+
+test('setup creates the wallet and sweeps; it resumes after an interruption', async () => {
+  const t = await setup({ wallet: false, feeLamports: 0n });
+  t.chain.fund(t.created.feePayer, SOL);
+  t.chain.rejectTransfers = true; // the sweep fails after the wallet is created
+  await assert.rejects(t.service.setupWallet(), /Wallet created; moving your SOL into it failed/);
+  t.chain.rejectTransfers = false;
+  const o = await t.service.overview();
+  assert.equal(o.initialized, true);
+  assert.ok(o.sweepableLamports > 0n);
+  const resumed = await t.service.setupWallet();
+  assert.equal(resumed.initialized, false);
+  assert.equal(await balance(t.chain, t.created.feePayer), FEE_FLOAT_LAMPORTS);
+  assert.equal((await t.service.overview()).sweepableLamports, 0n);
+  // SOL sent to the fee address later can be moved in too.
+  t.chain.fund(t.created.feePayer, SOL / 2n);
+  assert.equal((await t.service.overview()).sweepableLamports, SOL / 2n);
+  const swept = await t.service.sweepExcess();
+  assert.equal(swept.sweptLamports, SOL / 2n - 5000n);
+});
+
+test('the send journal keeps one key per send, migrates the old map, and bounds finished history', async () => {
+  const t = await setup();
+  const legacy = { id: 'legacy1', status: 'done', createdAt: '2026-01-01T00:00:00.000Z', records: [] };
+  await t.storage.local.set({ sends: { legacy1: legacy } });
+  assert.deepEqual((await t.service.listSends()).map((s) => s.id), ['legacy1']);
+  assert.equal((await t.storage.local.get('sends')).sends, undefined);
+  assert.deepEqual(await stored(t.storage, 'legacy1'), legacy);
+  const many = {};
+  for (let i = 0; i < MAX_FINISHED_SENDS + 5; i++)
+    many[`send:old${i}`] = { id: `old${i}`, status: 'done', createdAt: new Date(Date.UTC(2026, 0, 2, 0, 0, i)).toISOString(), records: [] };
+  many['send:open'] = { id: 'open', status: 'failed', createdAt: '2025-01-01T00:00:00.000Z', records: [] };
+  await t.storage.local.set(many);
+  await t.service.reclaimAbandoned().catch(() => {});
+  const left = await t.service.listSends();
+  assert.equal(left.filter((s) => s.status === 'done').length, MAX_FINISHED_SENDS);
+  assert.ok(left.some((s) => s.id === 'open'));
+  assert.ok(!left.some((s) => s.id === 'legacy1'));
+});
+
+test('token sends use the funded associated account first, else the largest balance', () => {
+  const accounts = [
+    { address: 'A', amount: 5n },
+    { address: 'ATA', amount: 10n },
+    { address: 'B', amount: 50n },
+  ];
+  assert.equal(pickTokenSource(accounts, 'ATA', 8n).address, 'ATA');
+  assert.equal(pickTokenSource(accounts, 'ATA', 20n).address, 'B');
+  assert.equal(pickTokenSource(accounts, 'none', 1n).address, 'B');
+  assert.equal(pickTokenSource(accounts, 'ATA', null).address, 'B');
+});

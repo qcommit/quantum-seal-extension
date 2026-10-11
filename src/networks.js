@@ -32,8 +32,15 @@ export const BUILT_IN = Object.freeze({
   },
 });
 
+// New installs open on mainnet once the release pins it, and on devnet until then.
+export function defaultCluster(builtIn = BUILT_IN) {
+  const m = builtIn['mainnet-beta'];
+  return m?.program && m.programSha256 && m.programSize ? 'mainnet-beta' : 'devnet';
+}
+export const isTestNetwork = (cluster) => cluster !== 'mainnet-beta';
+
 export const DEFAULT_SETTINGS = Object.freeze({
-  cluster: 'devnet',
+  cluster: defaultCluster(),
   autoLockMinutes: 15,
   rpc: {},
   // Per-cluster overrides for development builds: { program, programSha256, programSize, upgradeAuthority, genesis }.
