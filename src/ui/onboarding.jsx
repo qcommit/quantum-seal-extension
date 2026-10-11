@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { vault } from './common.js';
 import { ActionButton, ActionNotice, Mark, useAction } from './components.jsx';
-import { RemoveWallet } from './settings.jsx';
+import { PageHeading, RemoveWallet } from './settings.jsx';
 import { Check, Shield, Upload } from './icons.jsx';
 
 const MIN_PASSPHRASE = 12;
@@ -157,21 +157,12 @@ export function Unlock({ onDone }) {
     return (
       <div className="gate">
         <main className="gate-body">
-          <div className="page-heading">
-            <h1>Forgot your passphrase?</h1>
-          </div>
+          <PageHeading title="Forgot your passphrase?" onBack={() => setForgot(false)} />
           <RemoveWallet
+            locked
             onRemoved={onDone}
-            intro={
-              <p>
-                Nobody can recover it: the passphrase is what decrypts your keys. To get back in, remove the wallet from
-                this browser and restore it from your backup file.
-              </p>
-            }
+            intro={<p>Nobody can recover a passphrase, including Quantum Seal.</p>}
           />
-          <button type="button" className="ghost full" onClick={() => setForgot(false)}>
-            Back to unlock
-          </button>
         </main>
       </div>
     );

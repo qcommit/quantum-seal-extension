@@ -178,8 +178,11 @@ export function SendPage({ onBack }) {
                 </p>
               </div>
               <ActionButton className="secondary" busy={busy} onClick={createAndReview}>
-                Create it and review
+                Pay {solDisplay(needsAccount.rentLamports, 8)} SOL and continue
               </ActionButton>
+              <button type="button" className="ghost" disabled={busy} onClick={() => setNeedsAccount(null)}>
+                Use a different recipient
+              </button>
             </div>
           ) : (
             <ActionButton busy={busy} disabled={!to.trim() || !amount.trim()} onClick={review}>
@@ -188,7 +191,11 @@ export function SendPage({ onBack }) {
           )}
           <p className="hint">
             <Shield size={14} />
-            <span>A separate window shows the exact transfer before anything is signed.</span>
+            <span>
+              {needsAccount
+                ? 'Creating the account is signed right away from your fee address. The transfer itself is still reviewed in a separate window.'
+                : 'A separate window shows the exact transfer before anything is signed.'}
+            </span>
           </p>
         </div>
       ) : null}

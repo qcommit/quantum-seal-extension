@@ -149,7 +149,7 @@ const SCENES = [
       click('Settings', { exact: true }),
       click(/Change passphrase/),
       async (p) => p.getByLabel('Current passphrase').fill('the wrong passphrase'),
-      async (p) => p.getByLabel('New passphrase', { exact: true }).fill('a brand new passphrase'),
+      async (p) => p.getByLabel('New passphrase (12+ characters)').fill('a brand new passphrase'),
       async (p) => p.getByLabel('Repeat new passphrase').fill('a brand new passphrase'),
       click('Change passphrase', { exact: true }),
     ],

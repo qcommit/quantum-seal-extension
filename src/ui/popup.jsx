@@ -166,7 +166,7 @@ function Wallet({ onLock, onRemoved }) {
             }}
           />
         ) : null}
-        {page === 'activity' ? <ActivityTab /> : null}
+        {page === 'activity' ? <ActivityTab cluster={cluster} /> : null}
         {page === 'send' ? <SendPage onBack={() => go('home')} /> : null}
         {page === 'settings' ? (
           <SettingsPage
@@ -181,7 +181,15 @@ function Wallet({ onLock, onRemoved }) {
         />
         ) : null}
         {page === 'backup' ? <BackupPage onBack={() => go(backupReturn.current)} /> : null}
-        {page === 'passphrase' ? <PassphrasePage onBack={() => go('settings')} /> : null}
+        {page === 'passphrase' ? (
+          <PassphrasePage
+            onBack={() => go('settings')}
+            onBackup={() => {
+              backupReturn.current = 'settings';
+              go('backup');
+            }}
+          />
+        ) : null}
         {page === 'remove' ? <RemovePage onBack={() => go('settings')} onRemoved={onRemoved} /> : null}
       </main>
 

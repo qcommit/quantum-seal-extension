@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { decodeIntent, fromHex, hex, intentDigest } from 'quantum-seal-wallet/codec';
 import { BUILT_IN, explorerUrl } from '../networks.js';
 import { tokenLabel } from '../tokens.js';
-import { executeSignature, mayStillExecute } from '../wallet-service.js';
+import { executeSignature, mayStillExecute, EXPIRY_HORIZON_SLOTS } from '../wallet-service.js';
 import {
   vault,
   service,
@@ -256,7 +256,7 @@ function Review() {
   else if (notSent && pending && !running)
     // Kept on purpose until it can no longer run, so there is nothing to remove yet.
     footer = (
-      <button type="button" className="primary" onClick={() => window.close()}>
+      <button type="button" className="secondary" onClick={() => window.close()}>
         Close
       </button>
     );
@@ -264,7 +264,7 @@ function Review() {
     footer = (
       <>
         <button type="button" className="secondary" onClick={discard}>
-          Remove
+          Remove from Activity
         </button>
         <button type="button" className="primary" onClick={() => window.close()}>
           Close
@@ -326,7 +326,7 @@ function Review() {
                   : record.status === 'expired'
                     ? 'This approval expired before it could run. No funds left your wallet for it.'
                     : pending
-                      ? `Its signed approval was already published while uploading, so anyone holding it could still execute this transfer until slot ${record.expiry}, unless your wallet sends something else first. Activity shows it as Sent if that happens.`
+                      ? `Its signed approval was already published, so it could still run until about ${runsUntil(record)}. Sending anything else from this wallet cancels it. If it runs, Activity shows it as Sent.`
                       : 'You discarded this send.'}
               </p>
               {record.reclaimSignature ? (
@@ -423,7 +423,9 @@ function Review() {
           {view.kind === 'sol' && view.lamports !== undefined && view.fee && (inReview || record.status === 'done') ? (
             <KeyValue label="Total from wallet" strong>{`${lamportsToSol(view.lamports + view.fee.lamports)} SOL`}</KeyValue>
           ) : null}
-          <KeyValue label="Refundable proof deposit">{`${lamportsToSol(record.refundableRentLamports)} SOL`}</KeyValue>
+          {inReview || (['signed', 'submitting', 'failed', 'uncertain'].includes(record.status) && record.reclaimed !== true) ? (
+            <KeyValue label="Proof deposit from fee address (refunded)">{`${lamportsToSol(record.refundableRentLamports)} SOL`}</KeyValue>
+          ) : null}
           <details className="tech-details">
             <summary>
               <span>Technical details</span>
@@ -464,6 +466,12 @@ function CloseFooter() {
       </button>
     </footer>
   );
+}
+
+// Approvals expire a fixed number of slots after they were prepared (about 0.4 s each).
+function runsUntil(record) {
+  const at = new Date(Date.parse(record.createdAt) + Number(EXPIRY_HORIZON_SLOTS) * 400);
+  return at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function Shell({ network, children }) {

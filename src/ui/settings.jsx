@@ -250,10 +250,11 @@ function PageHeading({ title, onBack }) {
 }
 
 // Passphrase inputs are uncontrolled and cleared after use, as on the welcome screen.
-export function PassphrasePage({ onBack }) {
+export function PassphrasePage({ onBack, onBackup }) {
   const current = useRef(null);
   const next = useRef(null);
   const repeat = useRef(null);
+  const [changed, setChanged] = useState(false);
   const { busy, notice, run } = useAction();
   const change = () =>
     run(async () => {
@@ -270,49 +271,42 @@ export function PassphrasePage({ onBack }) {
         throw error;
       }
       for (const r of [current, next, repeat]) r.current.value = '';
-      return 'Passphrase changed. Backup files saved earlier still open with the old passphrase.';
+      setChanged(true);
+      return 'Passphrase changed.';
     });
   return (
     <>
       <PageHeading title="Change passphrase" onBack={onBack} />
       <div className="form-stack">
-        <input
-          ref={current}
-          className="text-input"
-          type="password"
-          aria-label="Current passphrase"
-          placeholder="Current passphrase"
-          autoComplete="current-password"
-          autoFocus
-        />
-        <input
-          ref={next}
-          className="text-input"
-          type="password"
-          aria-label="New passphrase"
-          placeholder="New passphrase (12+ characters)"
-          autoComplete="new-password"
-        />
-        <input
-          ref={repeat}
-          className="text-input"
-          type="password"
-          aria-label="Repeat new passphrase"
-          placeholder="Repeat new passphrase"
-          autoComplete="new-password"
-          onKeyDown={(e) => e.key === 'Enter' && change()}
-        />
+        <Field label="Current passphrase">
+          <input ref={current} type="password" autoComplete="current-password" autoFocus />
+        </Field>
+        <Field label="New passphrase (12+ characters)">
+          <input ref={next} type="password" autoComplete="new-password" />
+        </Field>
+        <Field label="Repeat new passphrase">
+          <input ref={repeat} type="password" autoComplete="new-password" onKeyDown={(e) => e.key === 'Enter' && change()} />
+        </Field>
+        <p className="hint">
+          <Shield size={14} />
+          <span>Backup files you already saved still open with the old passphrase. Save a new backup afterwards.</span>
+        </p>
         <ActionButton busy={busy} onClick={change}>
           Change passphrase
         </ActionButton>
         <ActionNotice notice={notice} />
+        {changed ? (
+          <button type="button" className="secondary full" onClick={onBackup}>
+            Back up now
+          </button>
+        ) : null}
       </div>
     </>
   );
 }
 
 // Removing the wallet, from Settings or from the lock screen ("Forgot passphrase?").
-export function RemoveWallet({ onRemoved, intro }) {
+export function RemoveWallet({ onRemoved, intro, locked = false }) {
   const [ack, setAck] = useState(false);
   const [typed, setTyped] = useState('');
   const open = useLoad(async () => ({ ...(await service.unfinishedSends()), info: await vault.publicInfo() }), []);
@@ -338,9 +332,10 @@ export function RemoveWallet({ onRemoved, intro }) {
       {pending ? (
         <Notice kind="warn">
           {pending} send{pending === 1 ? ' is' : 's are'} not finished
-          {open.data.lamports > 0n ? `, holding ${solDisplay(open.data.lamports, 6)} SOL in proof deposits` : ''}. Finish
-          or discard {pending === 1 ? 'it' : 'them'} in Activity first if you can; after removing, restoring the backup
+          {open.data.lamports > 0n ? `, holding ${solDisplay(open.data.lamports, 6)} SOL in proof deposits` : ''}. After
+          removal {open.data.lamports > 0n ? 'that SOL stays locked in its proof account, and ' : ''}restoring the backup
           does not bring {pending === 1 ? 'it' : 'them'} back.
+          {locked ? '' : ` Finish or discard ${pending === 1 ? 'it' : 'them'} in Activity first.`}
         </Notice>
       ) : null}
       {unsaved ? (
@@ -356,7 +351,11 @@ export function RemoveWallet({ onRemoved, intro }) {
       ) : null}
       <label className="check-row">
         <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-        <span>I have my backup file and its passphrase.</span>
+        <span>
+          {unsaved
+            ? 'I understand this wallet and its funds cannot be recovered without a backup.'
+            : 'I have my backup file and its passphrase.'}
+        </span>
       </label>
       <ActionButton
         className="danger full"
@@ -370,6 +369,8 @@ export function RemoveWallet({ onRemoved, intro }) {
     </div>
   );
 }
+
+export { PageHeading };
 
 export function RemovePage({ onBack, onRemoved }) {
   return (

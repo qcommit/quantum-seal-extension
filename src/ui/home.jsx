@@ -403,12 +403,13 @@ const STATUS_LABEL = {
 };
 const STATUS_ICON = { failed: Alert, uncertain: Alert, superseded: Close, expired: Clock, discarded: Close };
 
-export function ActivityTab() {
+export function ActivityTab({ cluster }) {
   const [version, setVersion] = useState(0);
   useEffect(() => onSendsChange(() => setVersion((v) => v + 1)), []);
   const sends = useLoad(() => service.listSends(), [version]);
   // Read from chain history: slower, and a failure here must not hide the sends.
-  const receipts = useLoad(() => service.listReceipts(), []);
+  const [receiptsTry, setReceiptsTry] = useState(0);
+  const receipts = useLoad(() => service.listReceipts(), [receiptsTry]);
   const items = [
     ...(sends.data ?? []).map((s) => ({ kind: 'send', key: s.id, at: s.createdAt, s })),
     ...(receipts.data ?? []).map((r) => ({ kind: 'receipt', key: r.id, at: r.at, r })),
@@ -422,7 +423,14 @@ export function ActivityTab() {
       </div>
       {sends.loading && !sends.data ? <Loading label="Loading activity" /> : null}
       {sends.error ? <Notice kind="error">{errorText(sends.error)}</Notice> : null}
-      {receipts.error ? <Notice kind="warn">Received transfers could not be loaded: {errorText(receipts.error)}</Notice> : null}
+      {receipts.error ? (
+        <div className="row-notice">
+          <Notice kind="warn">Couldn’t load received transfers. {errorText(receipts.error)}</Notice>
+          <button type="button" className="secondary small-button" disabled={receipts.loading} onClick={() => setReceiptsTry((n) => n + 1)}>
+            Retry
+          </button>
+        </div>
+      ) : null}
       {settled && !items.length ? (
         <Empty level={2} icon={<Inbox size={22} />} title="No activity yet">
           <p>Transfers to and from this wallet appear here.</p>
@@ -431,7 +439,9 @@ export function ActivityTab() {
       {items.length ? (
         <ul className="activity-list">
           {items.map((item) => (
-            <li key={item.key}>{item.kind === 'send' ? <SendRow s={item.s} /> : <ReceiptRow r={item.r} />}</li>
+            <li key={item.key}>
+              {item.kind === 'send' ? <SendRow s={item.s} current={cluster} /> : <ReceiptRow r={item.r} current={cluster} />}
+            </li>
           ))}
         </ul>
       ) : null}
@@ -445,7 +455,10 @@ export function ActivityTab() {
   );
 }
 
-function SendRow({ s }) {
+// The network is named only when it is not the one being viewed.
+const otherNetwork = (c, current) => (c && c !== current ? ` · ${BUILT_IN[c]?.label ?? c}` : '');
+
+function SendRow({ s, current }) {
   const Icon = STATUS_ICON[s.status] ?? SendArrow;
   const asset = s.display.asset === 'SOL' ? 'SOL' : tokenLabel(s.cluster, s.display.asset);
   return (
@@ -458,7 +471,8 @@ function SendRow({ s }) {
           Send {s.display.amount} {asset}
         </strong>
         <small>
-          To {short(s.display.to)} · {BUILT_IN[s.cluster]?.label ?? s.cluster} · {when(s.createdAt)}
+          To {short(s.display.to)}
+          {otherNetwork(s.cluster, current)} · {when(s.createdAt)}
         </small>
       </span>
       <span className={`pill ${s.status}`}>{STATUS_LABEL[s.status] ?? s.status}</span>
@@ -467,7 +481,7 @@ function SendRow({ s }) {
   );
 }
 
-function ReceiptRow({ r }) {
+function ReceiptRow({ r, current }) {
   const asset = r.asset === 'SOL' ? 'SOL' : tokenLabel(r.cluster, r.asset);
   const from = r.fromFeeAddress ? 'your fee address' : short(r.from);
   return (
@@ -486,11 +500,12 @@ function ReceiptRow({ r }) {
           Received {r.amount} {asset}
         </strong>
         <small>
-          From {from} · {BUILT_IN[r.cluster]?.label ?? r.cluster}
+          From {from}
+          {otherNetwork(r.cluster, current)}
           {r.at ? ` · ${when(r.at)}` : ''}
         </small>
       </span>
-      <span className="pill received">Received</span>
+      <span className="pill received">+{r.amount}</span>
       <External size={14} className="row-chevron" />
     </a>
   );

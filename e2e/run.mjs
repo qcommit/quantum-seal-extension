@@ -349,7 +349,7 @@ try {
   await popup.getByText('The recipient has no account for this token yet').waitFor({ timeout: 60000 });
   assert.equal(await connection.getAccountInfo(await ataOf(newcomer), 'confirmed'), null, 'nothing created before the user agrees');
   const newcomerReviewPromise = context.waitForEvent('page');
-  await popup.getByRole('button', { name: 'Create it and review' }).click();
+  await popup.getByRole('button', { name: /^Pay [\d.]+ SOL and continue$/ }).click();
   const newcomerReview = await newcomerReviewPromise;
   await newcomerReview.waitForLoadState();
   await newcomerReview.getByRole('button', { name: 'Approve & send' }).click();
@@ -526,12 +526,12 @@ try {
   await popup.getByRole('button', { name: 'Settings', exact: true }).click();
   await popup.getByRole('button', { name: /Change passphrase/ }).click();
   await popup.getByLabel('Current passphrase').fill('not the passphrase');
-  await popup.getByLabel('New passphrase', { exact: true }).fill(NEW_PASS);
+  await popup.getByLabel('New passphrase (12+ characters)').fill(NEW_PASS);
   await popup.getByLabel('Repeat new passphrase').fill(NEW_PASS);
   await popup.getByRole('button', { name: 'Change passphrase', exact: true }).click();
   await popup.getByText('The current passphrase is wrong.').waitFor({ timeout: 60000 });
   await popup.getByLabel('Current passphrase').fill(PASS);
-  await popup.getByLabel('New passphrase', { exact: true }).fill(NEW_PASS);
+  await popup.getByLabel('New passphrase (12+ characters)').fill(NEW_PASS);
   await popup.getByLabel('Repeat new passphrase').fill(NEW_PASS);
   await popup.getByRole('button', { name: 'Change passphrase', exact: true }).click();
   await popup.getByText(/Passphrase changed/).waitFor({ timeout: 60000 });
