@@ -51,6 +51,14 @@ async function shot(page, name) {
   await page.screenshot({ path: join(root, '.runtime/shots', `${name}.png`) });
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// The send journal: one chrome.storage.local key per send ("send:<id>"), oldest first.
+const journal = (page) =>
+  page.evaluate(async () =>
+    Object.entries(await chrome.storage.local.get(null))
+      .filter(([k]) => k.startsWith('send:'))
+      .map(([, v]) => v)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+  );
 const hex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 
 const work = mkdtempSync(join(tmpdir(), 'qs-e2e-'));
@@ -146,6 +154,8 @@ try {
   await popup.getByRole('button', { name: 'Create wallet' }).click();
   await popup.getByRole('heading', { name: 'Set up your wallet' }).waitFor({ timeout: 60000 });
   await shot(popup, '02-setup');
+  // Every non-mainnet screen carries the test-network banner.
+  assert.match(await popup.locator('.test-banner').textContent(), /Test network · Local validator/);
   const feeKey = new PublicKey((await popup.locator('code.address').first().textContent()).trim());
   step('wallet keys are created and the setup address is shown');
 
@@ -194,6 +204,7 @@ try {
   await review.waitForLoadState();
   await review.getByRole('heading', { name: 'Review transfer' }).waitFor();
   await shot(review, '05-review');
+  assert.match(await review.locator('.test-banner').textContent(), /Test network · Local validator/);
   const reviewText = await review.locator('main').textContent();
   assert.match(reviewText, /0\.25 SOL/);
   assert.ok(reviewText.includes(recipient.toBase58()));
@@ -203,10 +214,8 @@ try {
   await review.getByRole('button', { name: 'Approve & send' }).click();
   // Interrupt deterministically: close the window right after the 2nd chunk confirms.
   for (let i = 0; ; i++) {
-    const chunks = await popup.evaluate(async () => {
-      const sends = Object.values((await chrome.storage.local.get('sends')).sends ?? {});
-      return sends[0]?.records.filter((r) => r.phase === 'confirmed' && r.label.includes('upload-chunk')).length ?? 0;
-    });
+    const chunks =
+      (await journal(popup))[0]?.records.filter((r) => r.phase === 'confirmed' && r.label.includes('upload-chunk')).length ?? 0;
     if (chunks >= 2) break;
     if (i > 2400) throw new Error('Upload never started.');
     await sleep(25);
@@ -220,14 +229,13 @@ try {
   await review.getByText('Sent.').waitFor({ timeout: 180000 });
   await shot(review, '06-sent');
   // The done screen links the executing transaction on the explorer.
-  const execRecord = (await review.evaluate(async () => Object.values((await chrome.storage.local.get('sends')).sends)[0]))
-    .records.find((r) => r.phase === 'confirmed' && r.label.includes('execute-wallet-transfer'));
+  const execRecord = (await journal(review))[0].records.find((r) => r.phase === 'confirmed' && r.label.includes('execute-wallet-transfer'));
   assert.ok(execRecord, 'execute transaction recorded');
   const explorerHref = await review.getByRole('link', { name: /View on Solana Explorer/ }).getAttribute('href');
   assert.ok(explorerHref.includes(`/tx/${execRecord.signature}`), explorerHref);
   const received = BigInt(await connection.getBalance(recipient, 'confirmed'));
   assert.equal(received, 1000000n + 250000000n);
-  const sendRecord = await review.evaluate(async () => Object.values((await chrome.storage.local.get('sends')).sends)[0]);
+  const sendRecord = (await journal(review))[0];
   const chunks = sendRecord.records.filter((r) => r.phase === 'confirmed' && r.label.includes('upload-chunk')).length;
   assert.equal(chunks, 11);
   step('the resumed send completes with exactly 11 uploaded chunks and the exact amount');
@@ -352,6 +360,76 @@ try {
   step('an unclear submission stops as uncertain, is checked by signature, and resumes to exactly one transfer');
   await uncertain.close();
 
+  // 7c. Two sends prepared at the same nonce. A is approved and interrupted once its proof
+  // account is open; B then runs and moves the nonce on. Resuming A must not report it as
+  // sent: it is "Not sent", and A's proof deposit goes back to the fee key.
+  const toA = (await Keypair.generate()).publicKey,
+    toB = (await Keypair.generate()).publicKey;
+  await send(
+    [toA, toB].map((to) => SystemProgram.transfer({ fromPubkey: funder.publicKey, toPubkey: to, lamports: 1000000n })),
+    [funder],
+  );
+  const prepare = async (to, amount) => {
+    await popup.locator('nav').getByRole('button', { name: 'Home' }).click();
+    await popup.locator('.balance .amount').waitFor({ timeout: 60000 });
+    await popup.getByRole('button', { name: 'Send', exact: true }).click();
+    await popup.getByPlaceholder('Recipient address').fill(to.toBase58());
+    await popup.getByPlaceholder('Amount').fill(amount);
+    const opened = context.waitForEvent('page');
+    await popup.getByRole('button', { name: 'Review' }).click();
+    const page = await opened;
+    await page.waitForLoadState();
+    await page.getByRole('heading', { name: 'Review transfer' }).waitFor();
+    return page;
+  };
+  const reviewA = await prepare(toA, '0.01');
+  const reviewB = await prepare(toB, '0.02');
+  const [recordA, recordB] = (await journal(popup)).slice(-2);
+  assert.equal(recordA.nonce, recordB.nonce);
+  const urlA = reviewA.url();
+  await reviewA.getByRole('button', { name: 'Approve & send' }).click();
+  for (let i = 0; ; i++) {
+    const a = (await journal(popup)).find((r) => r.id === recordA.id);
+    if (a.records.some((r) => r.phase === 'confirmed' && r.label.includes('begin-proof'))) break;
+    if (i > 2400) throw new Error('Send A never opened its proof account.');
+    await sleep(25);
+  }
+  await reviewA.close();
+  const [proofA] = await PublicKey.findProgramAddress(
+    [Buffer.from('proof'), walletAddress.toBytes(), Buffer.from(recordA.digest, 'hex'), Buffer.from([0]), feeKey.toBytes()],
+    programId,
+  );
+  const proofRent = BigInt((await connection.getAccountInfo(proofA, 'confirmed')).lamports);
+  // A's open proof holds most of the fee float, so the user tops up the fee address.
+  await send([SystemProgram.transfer({ fromPubkey: funder.publicKey, toPubkey: feeKey, lamports: 50000000n })], [funder]);
+  await reviewB.getByRole('button', { name: 'Approve & send' }).click();
+  await reviewB.getByText('Sent.').waitFor({ timeout: 180000 });
+  await reviewB.close();
+  const feeBeforeResume = BigInt(await connection.getBalance(feeKey, 'confirmed'));
+  const resumedA = await context.newPage();
+  await resumedA.goto(urlA);
+  await resumedA.getByRole('button', { name: /Resume/ }).first().click();
+  await resumedA.getByText('Nothing was sent.').waitFor({ timeout: 120000 });
+  await resumedA.getByText(/proof deposit .* went back to your fee address/).waitFor({ timeout: 30000 });
+  await shot(resumedA, '06c-superseded');
+  const finalA = (await journal(resumedA)).find((r) => r.id === recordA.id);
+  assert.equal(finalA.status, 'superseded');
+  assert.equal(await connection.getAccountInfo(proofA, 'confirmed'), null);
+  assert.equal(BigInt(await connection.getBalance(toA, 'confirmed')), 1000000n);
+  assert.equal(BigInt(await connection.getBalance(toB, 'confirmed')), 1000000n + 20000000n);
+  const feeAfterReclaim = BigInt(await connection.getBalance(feeKey, 'confirmed'));
+  assert.ok(feeAfterReclaim >= feeBeforeResume + proofRent - 20000n, `fee key ${feeBeforeResume} -> ${feeAfterReclaim}`);
+  await resumedA.close();
+  // The extra SOL on the fee address is offered for moving into the wallet.
+  await popup.locator('nav').getByRole('button', { name: 'Activity' }).click();
+  await popup.locator('.activity-row .pill.superseded').waitFor({ timeout: 30000 });
+  await popup.locator('nav').getByRole('button', { name: 'Home' }).click();
+  await popup.getByRole('button', { name: 'Move to wallet' }).click({ timeout: 60000 });
+  await popup.getByText('Moved into your wallet.').waitFor({ timeout: 60000 });
+  const feeAfterMove = BigInt(await connection.getBalance(feeKey, 'confirmed'));
+  assert.ok(feeAfterMove >= 69900000n && feeAfterMove <= 70000000n, `fee float ${feeAfterMove}`);
+  step('a send superseded by another at the same nonce is reported "Not sent" and its proof deposit is reclaimed');
+
   // 8. Lock, wrong passphrase, unlock.
   await popup.getByRole('button', { name: 'Settings', exact: true }).click();
   await popup.getByRole('button', { name: 'Lock now' }).click();
@@ -374,7 +452,7 @@ try {
   const backup = JSON.parse(readFileSync(await download.path(), 'utf8'));
   assert.equal(backup.format, 'quantum-seal/extension-backup/1');
   assert.equal(backup.owner.format, 'quantum-seal/keystore/1');
-  assert.equal(backup.descriptors.localnet.wallet, walletAddress.toBase58());
+  assert.ok(backup.descriptors.localnet.some((d) => d.wallet === walletAddress.toBase58()));
   assert.ok(!JSON.stringify(backup).includes('"secretKey"'));
   step('backup downloads encrypted keys plus the wallet descriptor');
 
