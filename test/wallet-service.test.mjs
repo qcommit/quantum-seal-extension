@@ -45,6 +45,28 @@ async function edit(storage, id, fn) {
   await storage.local.set({ [`send:${id}`]: record });
   return record;
 }
+test('a send to this wallet, a program, a mint or a token account is refused before signing', async () => {
+  const t = await setup();
+  const TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+  const put = async (fields) => {
+    const address = await key();
+    t.chain.accounts.set(address, { lamports: 2039280n, executable: false, data: new Uint8Array(0), ...fields });
+    return address;
+  };
+  const refused = (to, pattern) => assert.rejects(t.service.prepareSend({ to, amount: '0.01' }), pattern);
+  await refused(t.d.wallet, /own address/);
+  await refused(t.chain.program, /is a program/);
+  await refused(await put({ owner: new PublicKey(TOKEN), data: new Uint8Array(82) }), /token mint/);
+  await refused(await put({ owner: new PublicKey(TOKEN), data: new Uint8Array(165) }), /token account/);
+  const ext = new Uint8Array(200);
+  ext[165] = 1;
+  await refused(await put({ owner: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'), data: ext }), /token mint/);
+  // Plain system accounts, other program-owned accounts and unused addresses are fine.
+  assert.ok(await t.service.prepareSend({ to: await put({ owner: new PublicKey('11111111111111111111111111111111') }), amount: '0.01' }));
+  assert.ok(await t.service.prepareSend({ to: await key(), amount: '0.01' }));
+  assert.equal(t.chain.connection.sent.length, 0, 'nothing is submitted while preparing');
+});
+
 // A signed send whose upload was interrupted after its proof account was opened.
 async function interruptedSend(t) {
   const record = await t.service.prepareSend({ to: await key(), amount: '0.01' });

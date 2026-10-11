@@ -146,6 +146,29 @@ function parseAddress(value, what = 'address') {
     throw new Error(what === 'address' ? 'That is not a valid Solana address.' : `That is not a valid ${what}.`);
   }
 }
+const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+const MINT_BYTES = 82;
+const TOKEN_ACCOUNT_BYTES = 165;
+// Catches the usual wrong-address mistakes before anything is signed: this wallet's own
+// address, a program, or a token mint or token account pasted where a wallet belongs.
+// Accounts the recipient has not used yet (no account on-chain) are fine.
+async function checkRecipient(connection, network, recipient, wallet) {
+  if (recipient.toBase58() === wallet)
+    throw new Error('That is this wallet’s own address. Enter the address you want to send to.');
+  const info = await connection.getAccountInfo(recipient, network.commitment);
+  if (!info) return;
+  if (info.executable) throw new Error('That address is a program, not a wallet. Check the recipient address.');
+  const owner = info.owner?.toBase58?.() ?? String(info.owner);
+  if (owner !== TOKEN_PROGRAM.toBase58() && owner !== TOKEN_2022) return;
+  const data = info.data ?? new Uint8Array(0);
+  // Token-2022 mints with extensions are longer; their account-type byte follows the base layout.
+  const mint = data.length === MINT_BYTES || (data.length > TOKEN_ACCOUNT_BYTES && data[TOKEN_ACCOUNT_BYTES] === 1);
+  throw new Error(
+    mint
+      ? 'That address is a token mint, not a wallet. Check the recipient address.'
+      : 'That address is a token account, not a wallet. Send to the owner’s wallet address instead.',
+  );
+}
 // The token account to send from: the wallet's associated token account when it holds
 // enough, otherwise the account with the largest balance.
 export function pickTokenSource(accounts, associated, needed) {
@@ -536,6 +559,7 @@ export function createWalletService({
       const recipient = parseAddress(to);
       const status = await ownStatus(network, d);
       if (!status.initialized) throw new Error('Create the wallet first.');
+      await checkRecipient(connection, network, recipient, d.wallet);
       // A send needs one proof deposit plus fees on the fee key; say so before signing.
       const cost = await executionCost(network, 1);
       const feeLamports = BigInt(await connection.getBalance(new PublicKey(info.feePayer), network.commitment));

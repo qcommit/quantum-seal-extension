@@ -1,7 +1,7 @@
 {
   "status": "passed",
-  "finishedAt": "2026-10-11T10:00:48.145Z",
-  "program": "BBqd324SfeMzHZNZ7K6u1kdwRWgab8PugpXeQK894Rz1",
+  "finishedAt": "2026-10-11T10:11:22.056Z",
+  "program": "C9n5S5Y1MqckGg2KqC2tJpxaoXnH2TAam3UEmx5w8HvU",
   "steps": [
     "local validator runs the wallet program",
     "extension loads and is pinned to the local deployment",
