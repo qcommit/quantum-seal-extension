@@ -184,7 +184,7 @@ try {
   for (let i = 0; ; i++) {
     const chunks = await popup.evaluate(async () => {
       const sends = Object.values((await chrome.storage.local.get('sends')).sends ?? {});
-      return sends[0]?.records.filter((r) => r.phase === 'confirmed' && r.label === 'upload-chunk').length ?? 0;
+      return sends[0]?.records.filter((r) => r.phase === 'confirmed' && r.label.includes('upload-chunk')).length ?? 0;
     });
     if (chunks >= 2) break;
     if (i > 2400) throw new Error('Upload never started.');
@@ -201,7 +201,7 @@ try {
   const received = BigInt(await connection.getBalance(recipient, 'confirmed'));
   assert.equal(received, 1000000n + 250000000n);
   const sendRecord = await review.evaluate(async () => Object.values((await chrome.storage.local.get('sends')).sends)[0]);
-  const chunks = sendRecord.records.filter((r) => r.phase === 'confirmed' && r.label === 'upload-chunk').length;
+  const chunks = sendRecord.records.filter((r) => r.phase === 'confirmed' && r.label.includes('upload-chunk')).length;
   assert.equal(chunks, 11);
   step('the resumed send completes with exactly 11 uploaded chunks and the exact amount');
   const feeAfterSend = BigInt(await connection.getBalance(feeKey, 'confirmed'));

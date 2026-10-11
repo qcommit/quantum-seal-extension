@@ -4,26 +4,24 @@ import { decodeIntent, fromHex } from 'quantum-seal-wallet/codec';
 
 const root = document.getElementById('app');
 const id = new URLSearchParams(location.search).get('id');
-// Labels the SDK attaches to each transaction, in order.
+// Labels the SDK attaches to each transaction, in order. Some transactions combine
+// steps (e.g. "upload-chunk+seal-proof+verify-batch-1-8"), so steps match by inclusion.
 const STEPS = [
-  ['begin-proof', 'Open proof account'],
   ['upload-chunk', 'Upload signature (11 chunks)'],
-  ['seal-proof', 'Seal upload'],
-  ['verify-batch', 'Verify on-chain (FORS + 7 XMSS layers)'],
-  ['execute-wallet-transfer', 'Execute transfer'],
-  ['reclaim-proof-rent', 'Reclaim proof rent'],
+  ['verify-batch', 'Seal and verify on-chain (FORS + 7 XMSS layers)'],
+  ['execute-wallet-transfer', 'Execute transfer and reclaim deposit'],
 ];
 
 function row(label, value, mono = false) {
   return h('div', { class: 'kv' }, h('span', {}, label), mono ? h('code', {}, value) : h('b', {}, value));
 }
 function stepState(record, key) {
-  const confirmed = record.records.filter((r) => r.phase === 'confirmed' && r.label.startsWith(key));
-  const prepared = record.records.filter((r) => r.phase === 'prepared' && r.label.startsWith(key));
+  const has = (r, phase) => r.phase === phase && r.label.includes(key);
+  const confirmed = record.records.filter((r) => has(r, 'confirmed'));
+  const prepared = record.records.filter((r) => has(r, 'prepared'));
   if (key === 'upload-chunk') return { done: confirmed.length, total: 11, active: prepared.length > confirmed.length };
   return { done: confirmed.length ? 1 : 0, total: 1, active: prepared.length > confirmed.length };
 }
-
 function progress(record) {
   return h('ol', { class: 'steps' }, ...STEPS.map(([key, label]) => {
     const s = stepState(record, key);

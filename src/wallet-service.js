@@ -28,9 +28,9 @@ import { deploymentFor, networkConfig, isAvailable } from './networks.js';
 export const SENDS_KEY = 'sends';
 export const SETTINGS_KEY = 'settings';
 const ASSOCIATED_TOKEN_PROGRAM = new PublicKey('ATokenGPvbdGVxr1b2hvZ9zbHQBhL1v8Tq9GZy3s3pVm');
-// Each send reimburses the fee key from the wallet (16 transactions x 5,000 lamports
-// plus a small margin, measured on devnet), so its float stays topped up.
-export const FEE_REFUND_LAMPORTS = 85000n;
+// Each send reimburses the fee key from the wallet (12 transactions x 5,000 lamports
+// plus a small margin), so its float stays topped up.
+export const FEE_REFUND_LAMPORTS = 65000n;
 // Float kept on the fee key: one proof account's rent (refunded after each send) plus fees.
 export const FEE_FLOAT_LAMPORTS = 70000000n;
 
