@@ -1,6 +1,7 @@
 // Send: pick an asset, enter recipient and amount, then review in a separate window.
 import { useState } from 'react';
-import { service, lamportsToSol, short, errorText, openReview } from './common.js';
+import { service, lamportsToSol, errorText, openReview } from './common.js';
+import { knownToken, tokenLabel } from '../tokens.js';
 import { ActionButton, ActionNotice, Field, Loading, Notice, Sheet, useAction, useLoad } from './components.jsx';
 import { ArrowLeft, Check, ChevronDown, Shield } from './icons.jsx';
 
@@ -30,8 +31,8 @@ export function SendPage({ onBack }) {
         },
         ...o.tokens.map((t) => ({
           id: t.mint,
-          name: short(t.mint, 5),
-          sub: 'SPL token',
+          name: tokenLabel(o.cluster, t.mint, 5),
+          sub: knownToken(o.cluster, t.mint)?.name ?? 'SPL token',
           balance: t.uiAmount,
           max: t.amount !== '0' ? t.uiAmount : null,
           mint: t.mint,
@@ -74,7 +75,7 @@ export function SendPage({ onBack }) {
               onClick={() => setPicking(true)}
             >
               <span className={`token-avatar ${selected.id === 'SOL' ? 'sol' : ''}`} aria-hidden="true">
-                {selected.id === 'SOL' ? 'S' : selected.id.slice(0, 2)}
+                {selected.id === 'SOL' ? 'S' : selected.name.slice(0, 2)}
               </span>
               <span className="token-name">
                 <strong>{selected.name}</strong>
@@ -94,7 +95,7 @@ export function SendPage({ onBack }) {
           </Field>
           <Field
             label="Amount"
-            unit={asset === 'SOL' ? 'SOL' : 'tokens'}
+            unit={asset === 'SOL' ? 'SOL' : (knownToken(o?.cluster, asset)?.symbol ?? 'tokens')}
             className="large"
             aside={
               <>
@@ -123,7 +124,7 @@ export function SendPage({ onBack }) {
             />
           </Field>
           <ActionNotice notice={notice} />
-          <ActionButton busy={busy} onClick={review}>
+          <ActionButton busy={busy} disabled={!to.trim() || !amount.trim()} onClick={review}>
             Review
           </ActionButton>
           <p className="hint">
@@ -147,7 +148,7 @@ export function SendPage({ onBack }) {
               }}
             >
               <span className={`token-avatar ${a.id === 'SOL' ? 'sol' : ''}`} aria-hidden="true">
-                {a.id === 'SOL' ? 'S' : a.id.slice(0, 2)}
+                {a.id === 'SOL' ? 'S' : a.name.slice(0, 2)}
               </span>
               <span className="token-name">
                 <strong title={a.mint}>{a.name}</strong>

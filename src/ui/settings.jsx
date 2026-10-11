@@ -30,6 +30,16 @@ function SettingsForm({ initial, onBack, onBackup, onLock }) {
   );
   const { busy, notice, run } = useAction();
   const version = chrome.runtime.getManifest().version;
+  // What is saved now, as the form shows it; Save is offered only when something differs.
+  const [saved, setSaved] = useState(() => ({
+    rpc: initial.rpc?.[cluster] ?? '',
+    lockMinutes: String(initial.autoLockMinutes),
+    pins: Object.fromEntries(PIN_FIELDS.map(([k]) => [k, String(initial.deployments?.[cluster]?.[k] ?? '')])),
+  }));
+  const dirty =
+    rpc.trim() !== saved.rpc ||
+    lockMinutes !== saved.lockMinutes ||
+    PIN_FIELDS.some(([k]) => pins[k].trim() !== saved.pins[k]);
 
   const save = () =>
     run(async () => {
@@ -54,6 +64,12 @@ function SettingsForm({ initial, onBack, onBackup, onLock }) {
       // Re-arm the auto-lock timer now, so it uses the new duration.
       touch();
       setLockMinutes(String(next.autoLockMinutes));
+      setSaved({
+        rpc: next.rpc[cluster] ?? '',
+        lockMinutes: String(next.autoLockMinutes),
+        pins: Object.fromEntries(PIN_FIELDS.map(([k]) => [k, String(next.deployments?.[cluster]?.[k] ?? '')])),
+      });
+      if (rpc.trim() !== (next.rpc[cluster] ?? '')) setRpc(next.rpc[cluster] ?? '');
       return 'Saved.';
     });
 
@@ -120,8 +136,8 @@ function SettingsForm({ initial, onBack, onBackup, onLock }) {
 
       <div className="save-row">
         <ActionNotice notice={notice} />
-        <ActionButton busy={busy} onClick={save}>
-          Save
+        <ActionButton busy={busy} disabled={!dirty} onClick={save}>
+          Save changes
         </ActionButton>
       </div>
 
@@ -141,7 +157,6 @@ function SettingsForm({ initial, onBack, onBackup, onLock }) {
             Lock now
             <small>Your passphrase is needed to unlock</small>
           </span>
-          <ChevronRight size={16} />
         </button>
       </div>
 
@@ -185,7 +200,7 @@ export function BackupPage({ onBack }) {
             The backup file holds your keys, encrypted with your passphrase, and your public wallet addresses. Keep it
             somewhere safe: anyone with the file and the passphrase controls the wallet.
           </p>
-          <p className="field-hint">The owner key inside also opens with the Quantum Seal command line.</p>
+          <p className="field-hint">Developers: the owner key in this file also works with the Quantum Seal command line.</p>
         </div>
         <ActionButton busy={busy} icon={<Download size={16} />} onClick={download}>
           Download backup

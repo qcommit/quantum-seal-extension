@@ -270,9 +270,9 @@ export function TestAddressCaption({ cluster }) {
 }
 
 // A label and value. Addresses (mono) are shown in full under their label, never cut.
-export function KeyValue({ label, children, mono = false }) {
+export function KeyValue({ label, children, mono = false, strong = false }) {
   return (
-    <div className={`kv${mono ? ' stack' : ''}`}>
+    <div className={`kv${mono ? ' stack' : ''}${strong ? ' total' : ''}`}>
       <span>{label}</span>
       {mono ? <code>{children}</code> : <b>{children}</b>}
     </div>

@@ -1,6 +1,7 @@
 // Home tab (setup, balance, fee key, tokens) and the Activity tab.
 import { useEffect, useState } from 'react';
 import { BUILT_IN, explorerUrl } from '../networks.js';
+import { knownToken, tokenLabel } from '../tokens.js';
 import { FEE_FLOAT_LAMPORTS } from '../wallet-service.js';
 import {
   vault,
@@ -97,7 +98,7 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
         </span>
         <h1 className="empty-title">Could not load this network</h1>
         <Notice kind="error">{errorText(overview.error)}</Notice>
-        <p>Try again, pick another network from the header, or check the RPC endpoint in Settings.</p>
+        <p>Or pick another network from the header.</p>
         <div className="row-actions">
           <ActionButton
             className="secondary"
@@ -143,7 +144,7 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
           <ArrowDown size={22} />
           <span>Receive</span>
         </button>
-        <button type="button" className="action" onClick={onSend}>
+        <button type="button" className="action" onClick={onSend} disabled={lowFees}>
           <ArrowUp size={22} />
           <span>Send</span>
         </button>
@@ -216,8 +217,8 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
                 <Fuel size={18} />
               </span>
               <p>
-                {solDisplay(o.sweepableLamports, 6)} SOL is waiting on your fee address
-                <span>Fees need only {solDisplay(FEE_FLOAT_LAMPORTS, 3)} SOL there. Move the rest into your wallet.</span>
+                {solDisplay(o.sweepableLamports, 6)} SOL extra on your fee address
+                <span>Fees need only {solDisplay(FEE_FLOAT_LAMPORTS, 3)} SOL there. Move the extra into your wallet.</span>
               </p>
             </div>
             <ActionButton
@@ -239,10 +240,11 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
         <ActionNotice notice={sweep.notice} />
         {o.otherWallets?.length ? (
           <Notice kind="warn">
-            An earlier {o.label} wallet of yours still holds{' '}
-            {o.otherWallets.map((w) => `${solDisplay(w.lamports)} SOL at ${short(w.wallet, 5)}`).join(', ')}. It belongs
-            to a previous deployment of the wallet program; to move it, use a build pinned to that deployment (program{' '}
-            {short(o.otherWallets[0].program, 5)}).
+            An older {o.label} wallet of yours still holds{' '}
+            {o.otherWallets.map((w) => `${solDisplay(w.lamports)} SOL (${short(w.wallet, 5)})`).join(', ')}. It was
+            created by an earlier version of the Quantum Seal program (
+            <span title={o.otherWallets[0].program}>{short(o.otherWallets[0].program, 5)}</span>), which this version
+            cannot move funds from.
           </Notice>
         ) : null}
       </div>
@@ -256,11 +258,11 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
           {o.tokens.map((t) => (
             <li className="token-row" key={t.account}>
               <span className="token-avatar" aria-hidden="true">
-                {t.mint.slice(0, 2)}
+                {(knownToken(o.cluster, t.mint)?.symbol ?? t.mint).slice(0, 2)}
               </span>
               <span className="token-name">
-                <strong title={t.mint}>{short(t.mint, 5)}</strong>
-                <small>SPL token</small>
+                <strong title={t.mint}>{tokenLabel(o.cluster, t.mint, 5)}</strong>
+                <small>{knownToken(o.cluster, t.mint)?.name ?? 'SPL token'}</small>
               </span>
               <span className="token-value">
                 <strong title={t.uiAmount}>{t.uiAmount}</strong>
@@ -355,7 +357,6 @@ function Setup({ o, action, refreshing, onRefresh, error, reminder }) {
         </button>
       </div>
       {error ? <Notice kind="error">{errorText(error)}</Notice> : null}
-      {reminder}
       {enough ? (
         <>
           <ActionButton
@@ -384,6 +385,7 @@ function Setup({ o, action, refreshing, onRefresh, error, reminder }) {
           <span>Checking for your deposit every few seconds. You can close this window meanwhile.</span>
         </p>
       )}
+      {reminder}
     </div>
   );
 }
@@ -445,7 +447,7 @@ export function ActivityTab() {
 
 function SendRow({ s }) {
   const Icon = STATUS_ICON[s.status] ?? SendArrow;
-  const asset = s.display.asset === 'SOL' ? 'SOL' : short(s.display.asset);
+  const asset = s.display.asset === 'SOL' ? 'SOL' : tokenLabel(s.cluster, s.display.asset);
   return (
     <button type="button" className="activity-row" onClick={() => openReview(s.id)}>
       <span className={`trade-avatar ${s.status}`} aria-hidden="true">
@@ -466,7 +468,7 @@ function SendRow({ s }) {
 }
 
 function ReceiptRow({ r }) {
-  const asset = r.asset === 'SOL' ? 'SOL' : short(r.asset);
+  const asset = r.asset === 'SOL' ? 'SOL' : tokenLabel(r.cluster, r.asset);
   const from = r.fromFeeAddress ? 'your fee address' : short(r.from);
   return (
     <a

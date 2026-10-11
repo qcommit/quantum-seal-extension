@@ -131,7 +131,7 @@ function Wallet({ onLock }) {
         >
           <Mark />
           <span className="network-text">
-            <strong className="top-title">Viewing: {deployment.label}</strong>
+            <strong className="top-title">{deployment.label}</strong>
             <small>Solana · {host}</small>
           </span>
           <ChevronDown size={16} />
@@ -229,7 +229,7 @@ function Wallet({ onLock }) {
 function NetworkList({ current, available, onPick }) {
   const describe = (id) => {
     if (id === 'mainnet-beta') return available[id] ? 'Solana mainnet' : 'Not available yet';
-    if (!available[id]) return 'Needs deployment pins in Settings';
+    if (!available[id]) return 'Set up in Settings (developers)';
     return id === 'devnet' ? 'Public test network' : '127.0.0.1:8899';
   };
   return (
@@ -271,8 +271,8 @@ function Receive({ label, cluster }) {
   return (
     <div className="receive">
       <p className="sheet-copy">
-        Your wallet address on <strong>{label}</strong>, for SOL and classic SPL tokens (not Token-2022). Your backup
-        always recovers it.
+        Your wallet address on <strong>{label}</strong>, for SOL and classic SPL tokens (not Token-2022). Restoring your
+        backup brings back this address.
       </p>
       <div className="address-card">
         <QrCode text={d.data.wallet} />

@@ -33,7 +33,14 @@ export function describeIntent(intent, { cluster } = {}) {
     problems.push('This approval is for a different network than the one it was prepared on.');
 
   if (a.kind === 'transfer')
-    return { ...base, kind: 'sol', amount: formatUnits(a.lamports, 9), unit: 'SOL', to: a.to.toBase58() };
+    return {
+      ...base,
+      kind: 'sol',
+      amount: formatUnits(a.lamports, 9),
+      lamports: a.lamports,
+      unit: 'SOL',
+      to: a.to.toBase58(),
+    };
 
   // A classic SPL Token TransferChecked: [12, amount u64 LE, decimals] with accounts
   // source, mint, destination, wallet (signer).

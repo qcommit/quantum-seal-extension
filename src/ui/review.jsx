@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { decodeIntent, fromHex, hex, intentDigest } from 'quantum-seal-wallet/codec';
 import { BUILT_IN, explorerUrl } from '../networks.js';
+import { tokenLabel } from '../tokens.js';
 import { executeSignature } from '../wallet-service.js';
 import {
   vault,
@@ -19,7 +20,7 @@ import {
 } from './common.js';
 import { ActionButton, KeyValue, Loading, Mark, Notice, Spinner, TestNetworkBanner } from './components.jsx';
 import { describeIntent, tokenAccountFor } from '../intent.js';
-import { Alert, Check, External, Lock, Shield } from './icons.jsx';
+import { Alert, Check, ChevronRight, Close, External, Lock, Shield } from './icons.jsx';
 
 const id = new URLSearchParams(location.search).get('id');
 // What the amount above the details means in each state.
@@ -188,8 +189,9 @@ function Review() {
             <Alert size={22} />
           </span>
           <h1>This send no longer exists</h1>
-          <p className="muted">It was removed from this browser. Close this window.</p>
+          <p className="muted">It was removed from this browser.</p>
         </main>
+        <CloseFooter />
       </Shell>
     );
   if (!unlocked)
@@ -200,14 +202,15 @@ function Review() {
             <Lock size={22} />
           </span>
           <h1>Wallet locked</h1>
-          <p className="muted">Unlock Quantum Seal from the toolbar, then open this send again from Activity.</p>
+          <p className="muted">Unlock Quantum Seal from the toolbar. This window updates once it is unlocked.</p>
         </main>
+        <CloseFooter />
       </Shell>
     );
 
   const { view } = state;
   const amount = view.amount ?? '?';
-  const unit = view.kind === 'token' ? short(view.mint, 6) : view.kind === 'sol' ? 'SOL' : '';
+  const unit = view.kind === 'token' ? tokenLabel(record.cluster, view.mint, 6) : view.kind === 'sol' ? 'SOL' : '';
   const network = BUILT_IN[record.cluster]?.label ?? record.cluster;
   const blocked = view.problems.length > 0;
   const inReview = record.status === 'review';
@@ -218,12 +221,7 @@ function Review() {
   if (inReview)
     footer = (
       <>
-        <button
-          type="button"
-          className="secondary"
-          disabled={running}
-          onClick={discard}
-        >
+        <button type="button" className={blocked ? 'primary' : 'secondary'} disabled={running} onClick={discard}>
           Cancel
         </button>
         <ActionButton className="primary" busy={running} disabled={blocked} onClick={() => run(true, view.digest)}>
@@ -307,9 +305,9 @@ function Review() {
         ) : null}
 
         {notSent ? (
-          <div className="result warn">
+          <div className={`result ${record.status === 'discarded' ? 'neutral' : 'warn'}`}>
             <span className="result-icon">
-              <Alert size={18} />
+              {record.status === 'discarded' ? <Close size={18} /> : <Alert size={18} />}
             </span>
             <div>
               <p className="result-title">Nothing was sent.</p>
@@ -330,7 +328,7 @@ function Review() {
         ) : null}
 
         {!inReview && !notSent && record.status !== 'done' ? (
-          <Progress record={record} live={running || record.status === 'submitting'} />
+          <Progress record={record} live={running} />
         ) : null}
 
         {record.status === 'uncertain' && !running ? (
@@ -368,7 +366,9 @@ function Review() {
         ) : null}
         {record.status === 'submitting' ? (
           <p className="muted small">
-            {running ? 'Sending… keep this window open.' : 'This send stopped before it finished. Resume continues from on-chain state.'}
+            {running
+              ? 'Sending… keep this window open.'
+              : 'Not moving? If this send was interrupted, Resume continues from what is already on-chain.'}
           </p>
         ) : null}
         {check ? <Notice kind={check.kind}>{check.text}</Notice> : null}
@@ -398,7 +398,7 @@ function Review() {
               </KeyValue>
             </>
           ) : null}
-          <KeyValue label="Network">{`${network} · genesis ${short(view.genesis, 4)}`}</KeyValue>
+          <KeyValue label="Network">{network}</KeyValue>
           <KeyValue label="From wallet" mono>
             {view.wallet}
           </KeyValue>
@@ -409,9 +409,21 @@ function Review() {
               <KeyValue label="Fee refill to" mono>{`${lamportsToSol(view.fee.lamports)} SOL → ${view.fee.to}`}</KeyValue>
             )
           ) : null}
+          {view.kind === 'sol' && view.lamports !== undefined && view.fee && (inReview || record.status === 'done') ? (
+            <KeyValue label="Total from wallet" strong>{`${lamportsToSol(view.lamports + view.fee.lamports)} SOL`}</KeyValue>
+          ) : null}
           <KeyValue label="Refundable proof deposit">{`${lamportsToSol(record.refundableRentLamports)} SOL`}</KeyValue>
-          <KeyValue label="Approval valid until slot">{view.expiry}</KeyValue>
-          <KeyValue label="Wallet nonce">{view.nonce}</KeyValue>
+          <details className="tech-details">
+            <summary>
+              <span>Technical details</span>
+              <ChevronRight size={14} className="summary-chevron" />
+            </summary>
+            <KeyValue label="Network genesis" mono>
+              {view.genesis}
+            </KeyValue>
+            <KeyValue label="Approval valid until slot">{view.expiry}</KeyValue>
+            <KeyValue label="Wallet nonce">{view.nonce}</KeyValue>
+          </details>
         </section>
 
         {inReview ? (
@@ -429,6 +441,17 @@ function Review() {
         </footer>
       ) : null}
     </Shell>
+  );
+}
+
+// For screens with nothing left to do here.
+function CloseFooter() {
+  return (
+    <footer className="review-footer">
+      <button type="button" className="secondary" onClick={() => window.close()}>
+        Close
+      </button>
+    </footer>
   );
 }
 

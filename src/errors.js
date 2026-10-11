@@ -40,6 +40,11 @@ const RULES = [
     () => 'This approval can no longer run: it expired, or the wallet has sent something else since.',
   ],
   [
+    /exceeded CUs meter|computational budget exceeded/i,
+    () =>
+      'One step needed more compute than the network allows, so it was not sent. Resume to try again, or Discard to get the deposit back.',
+  ],
+  [
     /^Simulation rejected ([^:]+): (.*)$/s,
     (m) =>
       `The network rejected a transaction (${m[1]}) in simulation, so it was not sent. Details: ${m[2]}`,
