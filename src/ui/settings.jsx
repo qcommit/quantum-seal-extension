@@ -40,6 +40,14 @@ function SettingsForm({ initial, onBack, onBackup, onLock, onPassphrase, onRemov
   );
   const { busy, notice, run } = useAction();
   const version = chrome.runtime.getManifest().version;
+  // Which reviewed core commit this build bundles (dist/build-info.json, written by the build).
+  const build = useLoad(
+    () =>
+      fetch(chrome.runtime.getURL('build-info.json'))
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    [],
+  );
   // What is saved now, as the form shows it; Save is offered only when something differs.
   const [saved, setSaved] = useState(() => ({
     rpc: initial.rpc?.[cluster] ?? '',
@@ -199,6 +207,15 @@ function SettingsForm({ initial, onBack, onBackup, onLock, onPassphrase, onRemov
 
       <p className="about">
         Quantum Seal {version} · transfers approved with SLH-DSA (FIPS 205)
+        {build.data?.core?.commit ? (
+          <>
+            <br />
+            <span title={build.data.core.commit}>
+              Core {build.data.core.commit.slice(0, 7)}
+              {build.data.release ? '' : ' · development build'}
+            </span>
+          </>
+        ) : null}
         <br />
         Open it with Alt+Shift+Q (change at chrome://extensions/shortcuts)
         <br />

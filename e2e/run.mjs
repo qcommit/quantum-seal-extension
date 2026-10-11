@@ -597,6 +597,9 @@ try {
   const saved = await popup.evaluate(async () => (await chrome.storage.local.get('settings')).settings);
   assert.equal(saved.autoLockMinutes, 1);
   assert.equal(saved.cluster, 'localnet');
+  // Settings names the core commit this build bundles.
+  const buildInfo = JSON.parse(readFileSync(join(dist, 'build-info.json'), 'utf8'));
+  await popup.getByText(`Core ${buildInfo.core.commit.slice(0, 7)}`).waitFor({ timeout: 30000 });
   await shot(popup, '09-settings');
   await sleep(80000);
   assert.equal(await popup.evaluate(async () => Boolean((await chrome.storage.session.get('unlocked')).unlocked)), false);
