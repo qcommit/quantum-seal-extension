@@ -1,11 +1,11 @@
 {
   "status": "passed",
-  "finishedAt": "2026-10-11T11:23:49.476Z",
+  "finishedAt": "2026-10-11T14:02:08.877Z",
   "cluster": "devnet",
-  "recipient": "EcR4yghG3sYGvMqhHHBnduxsdHzMofxgiPEjp2DUJm8m",
-  "seconds": 91.843,
+  "recipient": "3NCP1mZmUFXMzxAJodDWFVndreZkyDf7XVVmn2KWAGDm",
+  "seconds": 97.513,
   "build": {
     "release": true,
-    "core": "c6f1a17cb2159a10b48847a737f75f49243cfb43"
+    "core": "1c31c1a04bf48ed05b7fd5d4dc7ccbbfcf80594a"
   }
 }
