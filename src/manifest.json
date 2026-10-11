@@ -3,6 +3,7 @@
   "name": "Quantum Seal",
   "short_name": "Quantum Seal",
   "version": "0.1.0",
+  "minimum_chrome_version": "120",
   "description": "A post-quantum Solana wallet. Transfers are approved with SLH-DSA (NIST FIPS 205).",
   "action": { "default_popup": "popup.html", "default_title": "Quantum Seal" },
   "background": { "service_worker": "background.js", "type": "module" },
@@ -12,9 +13,8 @@
     "https://api.devnet.solana.com/*",
     "http://127.0.0.1/*"
   ],
-  "optional_host_permissions": ["https://*/*"],
   "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
   "content_security_policy": {
-    "extension_pages": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src https: http://127.0.0.1:* ws://127.0.0.1:* wss:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+    "extension_pages": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https: http://127.0.0.1:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
   }
 }

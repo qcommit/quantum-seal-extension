@@ -20,7 +20,7 @@ any funds move.
 
 - Send and receive SOL and classic SPL tokens
 - Review the exact transfer in the extension's own window before signing
-- One permanent wallet address, even if you rotate keys later
+- Your wallet address on each network is derived from your key, so a backup always recovers it
 - Keys stay on your device, encrypted with your passphrase
 - No account, no analytics, no tracking
 
@@ -35,7 +35,9 @@ Hold, send and receive Solana assets using post-quantum signatures.
 - **storage:** encrypted keys, settings and a journal of sends so interrupted sends resume.
 - **alarms:** auto-lock after the user's chosen idle period.
 - **idle:** lock the wallet when the computer locks.
-- **Host permissions (Solana RPC endpoints):** read balances and submit user-approved transactions.
+- **Host permissions (`api.mainnet-beta.solana.com`, `api.devnet.solana.com`):** read balances and submit user-approved transactions.
+- **Host permission (`127.0.0.1`):** developers can point the wallet at a local Solana validator; nothing is sent there unless the user selects the local network.
+- No optional permissions, no content scripts, no access to web pages. Minimum Chrome version 120.
 
 ## Data use disclosures
 
