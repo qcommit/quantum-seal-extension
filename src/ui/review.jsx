@@ -424,7 +424,7 @@ function Review() {
             <KeyValue label="Total from wallet" strong>{`${lamportsToSol(view.lamports + view.fee.lamports)} SOL`}</KeyValue>
           ) : null}
           {inReview || (['signed', 'submitting', 'failed', 'uncertain'].includes(record.status) && record.reclaimed !== true) ? (
-            <KeyValue label="Proof deposit from fee address (refunded)">{`${lamportsToSol(record.refundableRentLamports)} SOL`}</KeyValue>
+            <KeyValue label="Fee-address deposit (refunded)">{`${lamportsToSol(record.refundableRentLamports)} SOL`}</KeyValue>
           ) : null}
           <details className="tech-details">
             <summary>
