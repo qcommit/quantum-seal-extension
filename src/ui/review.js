@@ -71,7 +71,7 @@ async function render(message) {
         exec ? h('a', { href: explorerUrl(record.cluster, 'tx', exec.signature), target: '_blank', rel: 'noopener' }, 'View on Solana Explorer') : null);
     } else if (record.status === 'uncertain') {
       body.push(
-        h('p', { class: 'notice warn' }, 'The network did not confirm a transaction in time. Nothing will be re-signed. Check its status before resuming.'),
+        h('p', { class: 'notice warn' }, 'The network gave no clear answer for one transaction. Nothing will be re-signed. Check its status before resuming.'),
         h('code', { class: 'address' }, record.uncertainSignature ?? ''),
         h('div', { class: 'actions' },
           h('button', { class: 'btn secondary', type: 'button', onclick: () => check(status) }, 'Check status'),

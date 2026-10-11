@@ -277,6 +277,42 @@ try {
   step('an SPL token send completes through the review window');
   await tokenReview.close();
 
+  // 7b. An unclear outcome: the RPC fails one transaction submission mid-send. The send
+  // stops as "uncertain", the signature is checked, and resuming completes it once.
+  const uncertainTo = (await Keypair.generate()).publicKey;
+  await send([SystemProgram.transfer({ fromPubkey: funder.publicKey, toPubkey: uncertainTo, lamports: 1000000n })], [funder]);
+  let submissions = 0,
+    failed = false;
+  await context.route('http://127.0.0.1:8899/**', async (route) => {
+    const body = route.request().postData() ?? '';
+    if (!failed && body.includes('"sendTransaction"') && ++submissions === 5) {
+      failed = true;
+      return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"injected"}' });
+    }
+    return route.continue();
+  });
+  await popup.locator('nav').getByRole('button', { name: 'Home' }).click();
+  await popup.locator('.balance .amount').waitFor({ timeout: 60000 });
+  await popup.locator('nav').getByRole('button', { name: 'Send' }).click();
+  await popup.getByPlaceholder('Recipient address').fill(uncertainTo.toBase58());
+  await popup.getByPlaceholder('Amount').fill('0.1');
+  const uncertainPromise = context.waitForEvent('page');
+  await popup.getByRole('button', { name: 'Review' }).click();
+  const uncertain = await uncertainPromise;
+  await uncertain.waitForLoadState();
+  await uncertain.getByRole('button', { name: 'Approve & send' }).click();
+  await uncertain.getByText(/gave no clear answer for one transaction/).waitFor({ timeout: 120000 });
+  assert.ok(failed);
+  await shot(uncertain, '06b-uncertain');
+  await uncertain.getByRole('button', { name: 'Check status' }).click();
+  await uncertain.getByText(/Not found on-chain|Found on-chain/).waitFor({ timeout: 30000 });
+  await context.unroute('http://127.0.0.1:8899/**');
+  await uncertain.getByRole('button', { name: 'Resume' }).click();
+  await uncertain.getByText('Sent.').waitFor({ timeout: 180000 });
+  assert.equal(BigInt(await connection.getBalance(uncertainTo, 'confirmed')), 1000000n + 100000000n);
+  step('an unclear submission stops as uncertain, is checked by signature, and resumes to exactly one transfer');
+  await uncertain.close();
+
   // 8. Lock, wrong passphrase, unlock.
   await popup.locator('nav').getByRole('button', { name: 'Settings' }).click();
   await popup.getByRole('button', { name: 'Lock now' }).click();

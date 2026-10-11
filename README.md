@@ -41,7 +41,8 @@ npm run e2e            # full flow against a local validator in Chromium
 `npm run e2e` starts `solana-test-validator` (Agave 3.1.10) with the wallet program and
 drives the built extension through: create, fund, on-chain setup, receive, a SOL send
 that is interrupted mid-upload and resumed, an SPL token send, lock and unlock with a
-wrong passphrase, backup download, and auto-lock set through Settings (14 steps). `e2e/devnet-smoke.mjs` runs create, setup and a
+wrong passphrase, backup download, an injected RPC failure that leaves a send
+"uncertain" until it is checked and resumed, and auto-lock set through Settings (15 steps). `e2e/devnet-smoke.mjs` runs create, setup and a
 send against the public devnet deployment, with a funded devnet key supplied via
 `QS_DEVNET_FUNDER` (kept outside the repository).
 
