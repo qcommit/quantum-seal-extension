@@ -144,7 +144,11 @@ try {
   // 3. Create the vault.
   await shot(popup, '01-welcome');
   // Inter Variable is bundled with the extension and loads under its CSP.
+  // Browsers fetch a font only once text uses it: wait for the rendered welcome screen,
+  // then request Inter explicitly so a CSP block would show up as a load failure.
+  await popup.getByPlaceholder('Passphrase (12+ characters)').waitFor({ timeout: 30000 });
   const fonts = await popup.evaluate(async () => {
+    await document.fonts.load('16px "Inter Variable"');
     await document.fonts.ready;
     return [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family);
   });

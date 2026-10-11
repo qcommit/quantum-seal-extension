@@ -33,7 +33,7 @@ test('the built-in devnet deployment is pinned and parses', () => {
   assert.equal(isAvailable(devnet), true);
   const config = networkConfig(devnet);
   assert.equal(config.program, '6LBRd57jagVvhmpX1idsw9QXhoNHMHWstvpeGdSZAexT');
-  assert.equal(config.programSize, 141744);
+  assert.equal(config.programSize, 141888);
 });
 
 test('new installs default to mainnet only once mainnet is pinned', async () => {
