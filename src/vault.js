@@ -218,6 +218,17 @@ export function createVaultStore(storage) {
         }
       });
     },
+    // Throws 'Unable to unlock keystore.' unless `password` opens the stored owner key.
+    async checkPassphrase(password) {
+      const vault = await read();
+      if (!vault) throw new Error('No wallet in this browser profile.');
+      const owner = await decryptKey(vault.owner, password);
+      try {
+        if (hex(owner.slice(32)) !== vault.owner.publicKey) throw new Error('Unable to unlock keystore.');
+      } finally {
+        owner.fill(0);
+      }
+    },
     // Deletes the keys from this browser profile (encrypted and unlocked copies).
     async remove() {
       return withLock('vault', async () => {

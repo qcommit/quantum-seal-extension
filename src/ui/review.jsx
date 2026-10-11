@@ -17,6 +17,7 @@ import {
   lamportsToSol,
   onStorageChange,
   onSendsChange,
+  getSettings,
 } from './common.js';
 import { ActionButton, KeyValue, Loading, Mark, Notice, Spinner, TestNetworkBanner } from './components.jsx';
 import { describeIntent, tokenAccountFor } from '../intent.js';
@@ -83,6 +84,12 @@ function Review() {
   const [check, setCheck] = useState(null);
   const [running, setRunning] = useState(false);
   const runningRef = useRef(false);
+  // Settings > Security: ask for the passphrase again at approval. Uncontrolled, cleared after use.
+  const [askPassphrase, setAskPassphrase] = useState(false);
+  useEffect(() => {
+    getSettings().then((s) => setAskPassphrase(Boolean(s.confirmWithPassphrase)));
+  }, []);
+  const passphrase = useRef(null);
   // Only the newest load may apply, so progress never moves backwards on screen.
   const seq = useRef(0);
   const reload = useCallback(async () => {
@@ -138,7 +145,11 @@ function Review() {
     try {
       if (sign) {
         setMessage({ kind: 'info', text: 'Signing with your post-quantum key…' });
-        await service.approve(id, digest);
+        try {
+          await service.approve(id, digest, { passphrase: passphrase.current?.value || undefined });
+        } finally {
+          if (passphrase.current) passphrase.current.value = '';
+        }
         setMessage(null);
       }
       await reload();
@@ -447,6 +458,17 @@ function Review() {
             <Shield size={14} />
             <span>Approving signs exactly these details with your post-quantum key. Any change invalidates the signature.</span>
           </p>
+        ) : null}
+        {inReview && askPassphrase && !blocked ? (
+          <input
+            ref={passphrase}
+            className="text-input"
+            type="password"
+            aria-label="Passphrase to approve"
+            placeholder="Passphrase to approve"
+            autoComplete="current-password"
+            onKeyDown={(e) => e.key === 'Enter' && run(true, view.digest)}
+          />
         ) : null}
       </main>
       {footer ? (

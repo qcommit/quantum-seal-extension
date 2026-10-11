@@ -796,7 +796,7 @@ export function createWalletService({
     // Signing happens only from the review window, after the user approved what it showed.
     // shownDigest is the digest of the intent bytes the window decoded and displayed; the
     // stored bytes are decoded again here and every field the wallet controls is checked.
-    async approve(id, shownDigest) {
+    async approve(id, shownDigest, { passphrase } = {}) {
       return withLock(`send:${id}`, async () => {
         const record = await getSend(id);
         if (!record) throw new Error('This send no longer exists.');
@@ -840,6 +840,17 @@ export function createWalletService({
         if (intent.expiry <= slot + APPROVE_MARGIN_SLOTS) {
           await saveSend(finish(record, 'expired', { error: 'Not signed: this review expired before it was approved.' }));
           throw new Error('This review expired before you approved it. Nothing was signed. Prepare the send again.');
+        }
+        // Optional second factor at the moment of signing (Settings > Security).
+        if ((await settings()).confirmWithPassphrase) {
+          if (!passphrase) throw new Error('Enter your passphrase to approve. Nothing was signed.');
+          try {
+            await vault.checkPassphrase(passphrase);
+          } catch (error) {
+            if (error?.message === 'Unable to unlock keystore.')
+              throw new Error('Wrong passphrase. Nothing was signed.');
+            throw error;
+          }
         }
         const secret = await vault.ownerSecret();
         try {

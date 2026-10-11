@@ -642,3 +642,14 @@ test('with a reference endpoint that cannot confirm it, a send is not marked sen
   assert.equal(after.status, 'done');
   assert.equal(after.executeSignature, 'exec-1');
 });
+
+test('with "ask for my passphrase" on, approve signs only with the right passphrase', async () => {
+  const t = await setup();
+  await t.storage.local.set({ settings: { ...(await t.storage.local.get('settings')).settings, confirmWithPassphrase: true } });
+  const record = await t.service.prepareSend({ to: await key(), amount: '0.01' });
+  await assert.rejects(t.service.approve(record.id, record.digest), /Enter your passphrase/);
+  await assert.rejects(t.service.approve(record.id, record.digest, { passphrase: 'not the passphrase' }), /Wrong passphrase/);
+  assert.equal((await stored(t.storage, record.id)).status, 'review', 'nothing signed');
+  const signed = await t.service.approve(record.id, record.digest, { passphrase: pass });
+  assert.equal(signed.status, 'signed');
+});

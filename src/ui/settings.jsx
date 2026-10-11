@@ -34,6 +34,7 @@ function SettingsForm({ initial, onBack, onBackup, onLock, onPassphrase, onRemov
   const current = deploymentFor(initial);
   const [rpc, setRpc] = useState(initial.rpc?.[cluster] ?? '');
   const [lockMinutes, setLockMinutes] = useState(String(initial.autoLockMinutes));
+  const [askPassphrase, setAskPassphrase] = useState(Boolean(initial.confirmWithPassphrase));
   const [pins, setPins] = useState(() =>
     Object.fromEntries(PIN_FIELDS.map(([k]) => [k, String(initial.deployments?.[cluster]?.[k] ?? '')])),
   );
@@ -43,11 +44,13 @@ function SettingsForm({ initial, onBack, onBackup, onLock, onPassphrase, onRemov
   const [saved, setSaved] = useState(() => ({
     rpc: initial.rpc?.[cluster] ?? '',
     lockMinutes: String(initial.autoLockMinutes),
+    askPassphrase: Boolean(initial.confirmWithPassphrase),
     pins: Object.fromEntries(PIN_FIELDS.map(([k]) => [k, String(initial.deployments?.[cluster]?.[k] ?? '')])),
   }));
   const dirty =
     rpc.trim() !== saved.rpc ||
     lockMinutes !== saved.lockMinutes ||
+    askPassphrase !== saved.askPassphrase ||
     PIN_FIELDS.some(([k]) => pins[k].trim() !== saved.pins[k]);
 
   const save = () =>
@@ -55,6 +58,7 @@ function SettingsForm({ initial, onBack, onBackup, onLock, onPassphrase, onRemov
       // Start from what is stored now, so a network switched meanwhile is not undone.
       const next = structuredClone(await getSettings());
       next.autoLockMinutes = Math.min(240, Math.max(1, Math.round(Number(lockMinutes)) || 15));
+      next.confirmWithPassphrase = askPassphrase;
       if (rpc.trim()) next.rpc[cluster] = rpc.trim();
       else delete next.rpc[cluster];
       if (cluster !== 'mainnet-beta') {
@@ -76,6 +80,7 @@ function SettingsForm({ initial, onBack, onBackup, onLock, onPassphrase, onRemov
       setSaved({
         rpc: next.rpc[cluster] ?? '',
         lockMinutes: String(next.autoLockMinutes),
+        askPassphrase: next.confirmWithPassphrase,
         pins: Object.fromEntries(PIN_FIELDS.map(([k]) => [k, String(next.deployments?.[cluster]?.[k] ?? '')])),
       });
       if (rpc.trim() !== (next.rpc[cluster] ?? '')) setRpc(next.rpc[cluster] ?? '');
@@ -141,6 +146,13 @@ function SettingsForm({ initial, onBack, onBackup, onLock, onPassphrase, onRemov
             onChange={(e) => setLockMinutes(e.target.value)}
           />
         </Field>
+        <label className="check-row">
+          <input type="checkbox" checked={askPassphrase} onChange={(e) => setAskPassphrase(e.target.checked)} />
+          <span>
+            Ask for my passphrase to approve each transfer
+            <small className="check-hint">Stops anyone at your unlocked computer from approving sends.</small>
+          </span>
+        </label>
       </div>
 
       <div className="save-row">

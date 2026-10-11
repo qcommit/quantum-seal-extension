@@ -19,7 +19,7 @@ sends and receives SOL and classic SPL tokens.
 - **Home and Activity.** Balances, fee-address status with top-up and sweep, mainnet
   names for USDC, USDT and wrapped SOL, sends with their status, and incoming transfers
   read from chain history.
-- **Safety.** Auto-lock, backup reminder until a backup is saved, change passphrase,
+- **Safety.** Auto-lock, an optional passphrase check before every approval, backup reminder until a backup is saved, change passphrase,
   remove the wallet from the browser (also "Forgot passphrase?" on the lock screen, which
   leads to restoring a backup).
 - **Networks.** Mainnet (once pinned by the release) and devnet; custom RPC endpoints,

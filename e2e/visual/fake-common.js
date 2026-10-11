@@ -20,7 +20,7 @@ const TO = '5vVevv3JNQRKP8Xtqhs5FXLR1vGQ1wVh4HMjqfchFsJy';
 const MINT = 'Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr';
 const cluster = scene.includes('mainnet') ? 'mainnet-beta' : 'devnet';
 
-const settings = mergeSettings({ cluster, autoLockMinutes: 15 });
+const settings = mergeSettings({ cluster, autoLockMinutes: 15, confirmWithPassphrase: scene.includes('askpass') });
 export async function getSettings() {
   return structuredClone(settings);
 }

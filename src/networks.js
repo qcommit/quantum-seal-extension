@@ -48,6 +48,8 @@ export const isTestNetwork = (cluster) => cluster !== 'mainnet-beta';
 export const DEFAULT_SETTINGS = Object.freeze({
   cluster: defaultCluster(),
   autoLockMinutes: 15,
+  // Ask for the passphrase again before every approval (off by default).
+  confirmWithPassphrase: false,
   rpc: {},
   // Per-cluster overrides for development builds: { program, programSha256, programSize, upgradeAuthority, genesis }.
   deployments: {},

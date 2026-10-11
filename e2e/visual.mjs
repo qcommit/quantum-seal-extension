@@ -172,6 +172,7 @@ const SCENES = [
   ['review-locked', 'review', 'review-locked&id=review', REVIEW],
   ['review-missing', 'review', 'review&id=nope', REVIEW],
   ['review-mainnet', 'review', 'review-mainnet&id=review', REVIEW],
+  ['review-askpass', 'review', 'review-askpass&id=review', REVIEW, [scrollEnd]],
   // Mainnet variants used for the store screenshots (scripts/store-assets.mjs).
   ['receive-mainnet', 'popup', 'home-mainnet', POPUP, [click('Receive', { exact: true })]],
   ['review-done-mainnet', 'review', 'review-mainnet&id=done', REVIEW],
