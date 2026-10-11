@@ -475,3 +475,5 @@ dialog.sheet[open]::backdrop { animation: fade .2s ease-out; }
 .check-row input { width: 16px; height: 16px; margin: 1px 0 0; accent-color: var(--accent); flex-shrink: 0; }
 .link-button { align-self: center; padding: 6px 8px; font-size: 12px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; border-radius: 6px; }
 .link-button:hover { color: var(--ink-2); }
+.explorer-link { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 12px; font-size: 12px; color: var(--muted); text-decoration: none; }
+.explorer-link:hover { color: var(--ink-2); }

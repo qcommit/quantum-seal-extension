@@ -2,7 +2,7 @@
 // tabs, Send, Settings and Backup pages, and bottom sheets for network and Receive.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BUILT_IN, deploymentFor } from '../networks.js';
+import { BUILT_IN, deploymentFor, explorerUrl } from '../networks.js';
 import {
   vault,
   service,
@@ -25,7 +25,7 @@ import {
   TestNetworkBanner,
   useLoad,
 } from './components.jsx';
-import { Check, ChevronDown, Gear, Globe, History, Home, Lock } from './icons.jsx';
+import { Check, ChevronDown, External, Gear, Globe, History, Home, Lock } from './icons.jsx';
 import { Welcome, Unlock } from './onboarding.jsx';
 import { HomeTab, ActivityTab } from './home.jsx';
 import { SendPage } from './send.jsx';
@@ -284,6 +284,9 @@ function Receive({ label, cluster }) {
         <TestAddressCaption cluster={cluster} />
         <CopyButton text={d.data.wallet} />
       </div>
+      <a className="explorer-link" href={explorerUrl(cluster, 'address', d.data.wallet)} target="_blank" rel="noopener noreferrer">
+        View on Solana Explorer <External size={13} />
+      </a>
     </div>
   );
 }
