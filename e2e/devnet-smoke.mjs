@@ -64,7 +64,7 @@ try {
   const review = await reviewPromise;
   await review.waitForLoadState();
   await review.getByRole('button', { name: 'Approve & send' }).click();
-  await review.getByText('Sent.').waitFor({ timeout: 600000 });
+  await review.getByText('Sent.', { exact: true }).waitFor({ timeout: 600000 });
   assert.equal(BigInt(await connection.getBalance(recipient, 'confirmed')), 10000000n);
   const seconds = (Date.now() - started) / 1000;
   console.log(`PASS 0.01 SOL sent from the extension on devnet (${seconds.toFixed(0)} s total)`);

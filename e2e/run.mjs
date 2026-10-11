@@ -51,6 +51,13 @@ async function shot(page, name) {
   await page.screenshot({ path: join(root, '.runtime/shots', `${name}.png`) });
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Right after a transaction confirms, a 'confirmed' read can still come from the previous
+// bank for a moment. Balance checks after a send first wait for the next confirmed slot.
+let rpc = null;
+async function settled() {
+  const start = await rpc.getSlot('confirmed');
+  for (let i = 0; i < 100 && (await rpc.getSlot('confirmed')) <= start; i++) await sleep(100);
+}
 // The send journal: one chrome.storage.local key per send ("send:<id>"), oldest first.
 const journal = (page) =>
   page.evaluate(async () =>
@@ -76,6 +83,7 @@ try {
     { stdio: ['ignore', 'ignore', 'pipe'] },
   );
   const connection = new Connection(RPC, 'confirmed');
+  rpc = connection;
   for (let i = 0; ; i++) {
     try {
       await connection.getLatestBlockhash();
@@ -171,6 +179,7 @@ try {
   await popup.locator('.balance .amount').waitFor({ timeout: 120000 });
   const balanceText = await popup.locator('.balance .amount').textContent();
   assert.ok(parseFloat(balanceText) > 1.9, `wallet balance after setup: ${balanceText}`);
+  await settled();
   const feeAfterSetup = BigInt(await connection.getBalance(feeKey, 'confirmed'));
   assert.ok(feeAfterSetup >= 69000000n && feeAfterSetup <= 70000000n, `fee float ${feeAfterSetup}`);
   await shot(popup, '03-home');
@@ -230,13 +239,14 @@ try {
   await review.goto(reviewUrl);
   const resume = review.getByRole('button', { name: /Resume/ });
   await resume.first().click();
-  await review.getByText('Sent.').waitFor({ timeout: 180000 });
+  await review.getByText('Sent.', { exact: true }).waitFor({ timeout: 180000 });
   await shot(review, '06-sent');
   // The done screen links the executing transaction on the explorer.
   const execRecord = (await journal(review))[0].records.find((r) => r.phase === 'confirmed' && r.label.includes('execute-wallet-transfer'));
   assert.ok(execRecord, 'execute transaction recorded');
   const explorerHref = await review.getByRole('link', { name: /View on Solana Explorer/ }).getAttribute('href');
   assert.ok(explorerHref.includes(`/tx/${execRecord.signature}`), explorerHref);
+  await settled();
   const received = BigInt(await connection.getBalance(recipient, 'confirmed'));
   assert.equal(received, 1000000n + 250000000n);
   const sendRecord = (await journal(review))[0];
@@ -324,9 +334,10 @@ try {
     });
   });
   await tokenReview.getByRole('button', { name: 'Approve & send' }).click();
-  await tokenReview.getByText('Sent.').waitFor({ timeout: 180000 });
+  await tokenReview.getByText('Sent.', { exact: true }).waitFor({ timeout: 180000 });
   const longest = Math.max(0, ...(await tokenReview.evaluate(() => window.__longTasks)));
   assert.ok(longest < 500, `the review window was blocked for ${Math.round(longest)} ms`);
+  await settled();
   const tokenBalance = await connection.getTokenAccountBalance(ata(recipient), 'confirmed');
   assert.equal(tokenBalance.value.amount, '1500000');
   step('an SPL token send completes through the review window without freezing it; Activity shows sends and received transfers');
@@ -361,7 +372,8 @@ try {
   const newcomerReview = await newcomerReviewPromise;
   await newcomerReview.waitForLoadState();
   await newcomerReview.getByRole('button', { name: 'Approve & send' }).click();
-  await newcomerReview.getByText('Sent.').waitFor({ timeout: 180000 });
+  await newcomerReview.getByText('Sent.', { exact: true }).waitFor({ timeout: 180000 });
+  await settled();
   assert.equal((await connection.getTokenAccountBalance(await ataOf(newcomer), 'confirmed')).value.amount, '500000');
   await newcomerReview.close();
   step('Send offers recent recipients; a token send to a new holder opens their token account (after asking) and delivers');
@@ -397,7 +409,8 @@ try {
   await uncertain.getByText(/Not found on-chain|Found on-chain/).waitFor({ timeout: 30000 });
   await context.unroute('http://127.0.0.1:8899/**');
   await uncertain.getByRole('button', { name: 'Resume' }).click();
-  await uncertain.getByText('Sent.').waitFor({ timeout: 180000 });
+  await uncertain.getByText('Sent.', { exact: true }).waitFor({ timeout: 180000 });
+  await settled();
   assert.equal(BigInt(await connection.getBalance(uncertainTo, 'confirmed')), 1000000n + 100000000n);
   step('an unclear submission stops as uncertain, is checked by signature, and resumes to exactly one transfer');
   await uncertain.close();
@@ -445,7 +458,7 @@ try {
   // A's open proof holds most of the fee float, so the user tops up the fee address.
   await send([SystemProgram.transfer({ fromPubkey: funder.publicKey, toPubkey: feeKey, lamports: 50000000n })], [funder]);
   await reviewB.getByRole('button', { name: 'Approve & send' }).click();
-  await reviewB.getByText('Sent.').waitFor({ timeout: 180000 });
+  await reviewB.getByText('Sent.', { exact: true }).waitFor({ timeout: 180000 });
   await reviewB.close();
   const feeBeforeResume = BigInt(await connection.getBalance(feeKey, 'confirmed'));
   const resumedA = await context.newPage();
@@ -457,6 +470,7 @@ try {
   const finalA = (await journal(resumedA)).find((r) => r.id === recordA.id);
   assert.equal(finalA.status, 'superseded');
   assert.equal(await connection.getAccountInfo(proofA, 'confirmed'), null);
+  await settled();
   assert.equal(BigInt(await connection.getBalance(toA, 'confirmed')), 1000000n);
   assert.equal(BigInt(await connection.getBalance(toB, 'confirmed')), 1000000n + 20000000n);
   const feeAfterReclaim = BigInt(await connection.getBalance(feeKey, 'confirmed'));
@@ -470,6 +484,7 @@ try {
   await shot(popup, '07d-home-sweep');
   await popup.getByRole('button', { name: 'Move to wallet' }).click({ timeout: 60000 });
   await popup.getByText('Moved into your wallet.').waitFor({ timeout: 60000 });
+  await settled();
   const feeAfterMove = BigInt(await connection.getBalance(feeKey, 'confirmed'));
   assert.ok(feeAfterMove >= 69900000n && feeAfterMove <= 70000000n, `fee float ${feeAfterMove}`);
   step('a send superseded by another at the same nonce is reported "Not sent" and its proof deposit is reclaimed');
@@ -492,7 +507,8 @@ try {
     await topUpReview.waitForLoadState();
     assert.ok((await topUpReview.locator('main').textContent()).includes(feeKey.toBase58()));
     await topUpReview.getByRole('button', { name: 'Approve & send' }).click();
-    await topUpReview.getByText('Sent.').waitFor({ timeout: 180000 });
+    await topUpReview.getByText('Sent.', { exact: true }).waitFor({ timeout: 180000 });
+    await settled();
     const after = BigInt(await connection.getBalance(feeKey, 'confirmed'));
     assert.ok(after >= 70000000n - 100000n && after > before, `fee key ${before} -> ${after}`);
     await topUpReview.close();
@@ -567,7 +583,8 @@ try {
   await guarded.getByText('Wrong passphrase. Nothing was signed.').waitFor({ timeout: 60000 });
   await guarded.getByLabel('Passphrase to approve').fill(NEW_PASS);
   await guarded.getByRole('button', { name: 'Approve & send' }).click();
-  await guarded.getByText('Sent.').waitFor({ timeout: 180000 });
+  await guarded.getByText('Sent.', { exact: true }).waitFor({ timeout: 180000 });
+  await settled();
   assert.equal(BigInt(await connection.getBalance(guardedTo, 'confirmed')), 20000000n);
   await guarded.close();
   step('with "ask for my passphrase" on, a send is approved only with the right passphrase');

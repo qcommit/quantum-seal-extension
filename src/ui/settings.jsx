@@ -239,6 +239,10 @@ export function BackupPage({ onBack }) {
             The backup file holds your keys, encrypted with your passphrase, and your public wallet addresses. Keep it
             somewhere safe: anyone with the file and the passphrase controls the wallet.
           </p>
+          <p>
+            <strong>It opens only with the passphrase you have now.</strong> If you forget that passphrase, the file
+            cannot be opened either, so write it down and keep it apart from the file.
+          </p>
           <p className="field-hint">Developers: the owner key in this file also works with the Quantum Seal command line.</p>
         </div>
         <ActionButton busy={busy} icon={<Download size={16} />} onClick={download}>

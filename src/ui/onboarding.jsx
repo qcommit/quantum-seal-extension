@@ -52,6 +52,13 @@ export function Welcome({ onDone }) {
           ))}
         </div>
         {mode === 'create' ? <CreateForm onDone={onDone} /> : <RestoreForm onDone={onDone} />}
+        <p className="hint gate-note">
+          <Shield size={14} />
+          <span>
+            No seed phrase: you save an encrypted backup file instead. Recovery phrases from other wallets cannot be
+            imported.
+          </span>
+        </p>
       </main>
     </div>
   );

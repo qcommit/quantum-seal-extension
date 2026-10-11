@@ -15,6 +15,7 @@ import {
   errorText,
   friendlyMessage,
   lamportsToSol,
+  solDisplay,
   onStorageChange,
   onSendsChange,
   getSettings,
@@ -285,7 +286,7 @@ function Review() {
   else if (record.status === 'submitting' && !running)
     footer = (
       <button type="button" className="secondary" onClick={() => run(false)}>
-        Resume if stalled
+        Resume send
       </button>
     );
   else if (record.status === 'done')
@@ -392,7 +393,7 @@ function Review() {
         {record.status === 'submitting' ? (
           <p className="muted small">
             {running
-              ? 'Sending… keep this window open.'
+              ? 'Sending… about a minute. Keep this window open.'
               : 'Not moving? If this send was interrupted, Resume continues from what is already on-chain.'}
           </p>
         ) : null}
@@ -438,7 +439,10 @@ function Review() {
             <KeyValue label="Total from wallet" strong>{`${lamportsToSol(view.lamports + view.fee.lamports)} SOL`}</KeyValue>
           ) : null}
           {inReview || (['signed', 'submitting', 'failed', 'uncertain'].includes(record.status) && record.reclaimed !== true) ? (
-            <KeyValue label="Fee-address deposit (refunded)">{`${lamportsToSol(record.refundableRentLamports)} SOL`}</KeyValue>
+            <KeyValue label="Held on fee address until sent">{`${solDisplay(record.refundableRentLamports, 4)} SOL`}</KeyValue>
+          ) : null}
+          {inReview ? (
+            <KeyValue label="Network fees, from your fee address">≈ 0.00006 SOL</KeyValue>
           ) : null}
           <details className="tech-details">
             <summary>
@@ -456,7 +460,10 @@ function Review() {
         {inReview ? (
           <p className="hint">
             <Shield size={14} />
-            <span>Approving signs exactly these details with your post-quantum key. Any change invalidates the signature.</span>
+            <span>
+              Approving signs exactly these details with your post-quantum key. Sending then takes about a minute (12
+              transactions): keep this window open until it shows “Sent”.
+            </span>
           </p>
         ) : null}
         {inReview && askPassphrase && !blocked ? (

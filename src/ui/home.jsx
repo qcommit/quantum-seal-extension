@@ -162,8 +162,8 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
               <p>
                 Add SOL to your fee address to send
                 <span>
-                  It holds {solDisplay(o.feeLamports, 6)} SOL; a send needs about {solDisplay(o.feeNeededLamports, 3)} SOL
-                  there. Send SOL to it from any wallet or exchange.
+                  Send at least {solDisplay(o.feeNeededLamports - o.feeLamports, 6)} SOL to it from another wallet or
+                  exchange. Your wallet can’t top it up itself: every move out of the wallet needs this deposit first.
                 </span>
               </p>
             </div>
@@ -336,10 +336,17 @@ function Setup({ o, action, refreshing, onRefresh, error, reminder }) {
       <div className="page-heading">
         <h1>Set up your wallet</h1>
         <p>
-          Send at least {lamportsToSol(SETUP_MINIMUM_LAMPORTS)} SOL to this address on <strong>{o.label}</strong>. It
-          becomes your fee address: {lamportsToSol(FEE_FLOAT_LAMPORTS)} SOL stays here for network fees and the rest
-          moves into your new wallet.
+          Send at least {lamportsToSol(SETUP_MINIMUM_LAMPORTS)} SOL to this address on <strong>{o.label}</strong>, once.
+          This is your <strong>fee address</strong>, not your wallet address: {lamportsToSol(FEE_FLOAT_LAMPORTS)} SOL
+          stays here for network fees and send deposits, and the rest moves into your new wallet. When it shows Ready,
+          tap Create my wallet; your wallet address then appears under Receive.
         </p>
+        {o.isTestNetwork && o.cluster === 'devnet' ? (
+          <p className="hint">
+            <Clock size={14} />
+            <span>Test SOL for devnet: faucet.solana.com</span>
+          </p>
+        ) : null}
       </div>
       <div className="setup-balance" aria-live="polite">
         <span>
@@ -384,7 +391,7 @@ function Setup({ o, action, refreshing, onRefresh, error, reminder }) {
       {enough ? null : (
         <p className="hint">
           <Clock size={14} />
-          <span>Checking for your deposit every few seconds. You can close this window meanwhile.</span>
+          <span>Checking for your deposit every few seconds. You can close this window and come back to tap Create my wallet.</span>
         </p>
       )}
       {reminder}
