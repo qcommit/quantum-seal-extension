@@ -21,10 +21,10 @@ const NETWORKS = {
     label: 'Devnet',
     rpc: 'https://api.devnet.solana.com',
     // Verified on-chain by scripts/pin-deployment.mjs on 2026-10-11.
-    program: '6LBRd57jagVvhmpX1idsw9QXhoNHMHWstvpeGdSZAexT',
+    program: 'HPopUzhpfG7Zn7BBuQ9FkJKSRB9e3vfgwrySCG7b7wHy',
     programSha256: 'e5442efbe6b7eccc372826392870b4b7f1ba3bff769deac8908881cc15d00d37',
     programSize: 141888,
-    upgradeAuthority: 'Ds6WwjdyfQzKGsCUKKrMw1NwB14ySk2qgawtrUtsfebV',
+    upgradeAuthority: null,
   },
   localnet: {
     label: 'Local validator',

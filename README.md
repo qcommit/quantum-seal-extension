@@ -71,7 +71,7 @@ a pattern to render only some states: `node e2e/visual.mjs '^review'`.
 
 ## Status
 
-- Devnet: built in (`6LBRd57jagVvhmpX1idsw9QXhoNHMHWstvpeGdSZAexT`).
+- Devnet: built in, pinned to an immutable deployment of the v0.2.0 program (`HPopUzhpfG7Zn7BBuQ9FkJKSRB9e3vfgwrySCG7b7wHy`), the same configuration mainnet will use.
 - Mainnet: available once the reviewed, immutable program is deployed. Pin it with
   `node scripts/pin-deployment.mjs --cluster mainnet-beta --program <ADDRESS> --binary
   ../quantum-seal-wallet/target/deploy/seal_wallet.so`, which verifies the deployment

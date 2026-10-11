@@ -32,7 +32,7 @@ test('the built-in devnet deployment is pinned and parses', () => {
   const devnet = deploymentFor(mergeSettings(null), 'devnet');
   assert.equal(isAvailable(devnet), true);
   const config = networkConfig(devnet);
-  assert.equal(config.program, '6LBRd57jagVvhmpX1idsw9QXhoNHMHWstvpeGdSZAexT');
+  assert.equal(config.program, 'HPopUzhpfG7Zn7BBuQ9FkJKSRB9e3vfgwrySCG7b7wHy');
   assert.equal(config.programSize, 141888);
 });
 
