@@ -18,6 +18,7 @@ import {
   receiptsOf,
   formatUnits,
   mayStillExecute,
+  corroborate,
 } from '../src/wallet-service.js';
 import { fakeStorage } from './support/fake-storage.mjs';
 import { fakeChain } from './support/fake-chain.mjs';
@@ -598,4 +599,46 @@ test('recentRecipients lists delivered sends on this network, newest first, with
   await make(c, 'done', '2026-10-06T00:00:00Z', 'devnet');
   await make(t.created.feePayer, 'done', '2026-10-07T00:00:00Z');
   assert.deepEqual((await t.service.recentRecipients()).map((r) => r.address), [a, b]);
+});
+
+test('corroborate: outcomes stand only when the reference endpoint agrees', async () => {
+  assert.equal(await corroborate(null, { status: 'done', signature: 'x' }), true, 'no reference: nothing to check');
+  const statuses = { good: { confirmationStatus: 'finalized', err: null }, failed: { confirmationStatus: 'finalized', err: {} }, pending: { confirmationStatus: 'processed', err: null } };
+  const t = await setup();
+  const reference = {
+    getSignatureStatuses: async ([sig]) => ({ value: [statuses[sig] ?? null] }),
+    getAccountInfo: (k) => t.chain.connection.getAccountInfo(k),
+    getSlot: async () => 5000n,
+  };
+  assert.equal(await corroborate(reference, { status: 'done', signature: 'good' }), true);
+  for (const sig of ['failed', 'pending', 'unknown']) assert.equal(await corroborate(reference, { status: 'done', signature: sig }), false, sig);
+  // The live wallet is at nonce 0, epoch 0.
+  assert.equal(await corroborate(reference, { status: 'superseded', wallet: t.d.wallet, nonce: 0n, epoch: 0n }), false);
+  assert.equal(await corroborate(reference, { status: 'superseded', wallet: t.d.wallet, nonce: 3n, epoch: 0n }), true);
+  assert.equal(await corroborate(reference, { status: 'expired', expiry: 6000n }), false);
+  assert.equal(await corroborate(reference, { status: 'expired', expiry: 4000n }), true);
+});
+
+test('with a reference endpoint that cannot confirm it, a send is not marked sent until it does', async () => {
+  const t = await setup();
+  let confirms = false;
+  const reference = {
+    getSignatureStatuses: async (sigs) => ({ value: sigs.map(() => (confirms ? { confirmationStatus: 'finalized', err: null } : null)) }),
+    getAccountInfo: (k) => t.chain.connection.getAccountInfo(k),
+    getSlot: async () => t.chain.slot,
+  };
+  const service = createWalletService({ vault: t.vault, storage: t.storage, connect: () => t.chain.connection, referenceOverride: () => reference });
+  const { record } = await interruptedSend(t);
+  // The configured RPC reports this send's own execute transaction as confirmed.
+  await edit(t.storage, record.id, (r) => r.records.push({ phase: 'confirmed', label: 'execute-wallet-transfer+reclaim-proof-rent', signature: 'exec-1' }));
+  await service.reclaimAbandoned();
+  let after = await stored(t.storage, record.id);
+  assert.equal(after.status, 'submitting');
+  assert.ok(after.approval, 'the signed approval is kept');
+  assert.match(after.error, /do not agree/);
+  confirms = true;
+  await service.reclaimAbandoned();
+  after = await stored(t.storage, record.id);
+  assert.equal(after.status, 'done');
+  assert.equal(after.executeSignature, 'exec-1');
 });

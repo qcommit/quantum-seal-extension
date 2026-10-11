@@ -375,6 +375,9 @@ function Review() {
             </p>
           </>
         ) : null}
+        {record.status === 'submitting' && !running && record.error ? (
+          <Notice kind="warn">{friendlyMessage(record.error)}</Notice>
+        ) : null}
         {record.status === 'submitting' ? (
           <p className="muted small">
             {running

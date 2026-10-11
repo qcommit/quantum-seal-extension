@@ -78,6 +78,26 @@ export async function crossCheckRpc({ reference, wallet, intent, slot }) {
     );
   return BigInt(refSlot);
 }
+// With a custom mainnet RPC, an outcome is recorded only once the public endpoint agrees:
+// the execute transaction is confirmed there, the wallet's nonce really moved, or the
+// approval really expired. A lying RPC can then delay a label, never fake one.
+export async function corroborate(reference, outcome) {
+  if (!reference) return true;
+  if (outcome.status === 'done') {
+    const [st] = (await reference.getSignatureStatuses([outcome.signature], { searchTransactionHistory: true })).value;
+    return Boolean(st && !st.err && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized'));
+  }
+  if (outcome.status === 'superseded') {
+    const account = await reference.getAccountInfo(new PublicKey(outcome.wallet), 'confirmed');
+    const state = account ? decodeWallet(Uint8Array.from(account.data)) : null;
+    return Boolean(state && (state.nonce !== outcome.nonce || state.epoch !== outcome.epoch));
+  }
+  if (outcome.status === 'expired') return BigInt(await reference.getSlot('confirmed')) > outcome.expiry;
+  return true;
+}
+export const DISAGREE_TEXT =
+  'Your custom RPC and the public Solana endpoint do not agree on what happened to this send yet. Nothing more was sent. Check again later, or change the RPC in Settings.';
+
 // Finished sends kept in the journal; unfinished ones are never dropped.
 export const MAX_FINISHED_SENDS = 200;
 export const SUPERSEDED_TEXT = 'Not sent: the wallet moved on, so this approval can no longer execute.';
@@ -284,8 +304,19 @@ export function createWalletService({
   fetchImpl = globalThis.fetch?.bind(globalThis),
   // For tests: (config) => connection. Defaults to a web3.js Connection.
   connect,
+  // For tests: (deployment) => reference connection, as if a custom mainnet RPC were set.
+  referenceOverride,
 }) {
   let cached = null;
+  // The public mainnet endpoint, when the user set a custom mainnet RPC (else null).
+  function referenceFor(deployment) {
+    if (referenceOverride) return referenceOverride(deployment);
+    if (deployment?.cluster !== 'mainnet-beta' || deployment.rpc === BUILT_IN['mainnet-beta'].rpc) return null;
+    const refConfig = { ...networkConfig({ ...deployment, rpc: BUILT_IN['mainnet-beta'].rpc }) };
+    return connect
+      ? connect(refConfig)
+      : new Connection(refConfig.rpc, { commitment: 'confirmed', disableRetryOnRateLimit: true, fetch: rateLimitedFetch(fetchImpl) });
+  }
 
   async function settings() {
     return mergeSettings((await storage.local.get(SETTINGS_KEY))[SETTINGS_KEY]);
@@ -417,9 +448,16 @@ export function createWalletService({
 
   // Decides what happened to a signed send that did not (or may not) finish, from
   // evidence only: its own execute transaction, or the wallet's nonce and history.
-  async function settle(record, network, d) {
+  async function settle(record, network, d, deployment) {
+    const reference = referenceFor(deployment);
+    // Records an outcome only if the reference endpoint (custom mainnet RPC only) agrees.
+    const decide = async (status, fields, outcome) => {
+      if (await corroborate(reference, outcome)) return finish(record, status, fields);
+      record.error = DISAGREE_TEXT;
+      return record;
+    };
     const own = executeSignature(record);
-    if (own) return finish(record, 'done', { executeSignature: own, reclaimed: true });
+    if (own) return decide('done', { executeSignature: own, reclaimed: true }, { status: 'done', signature: own });
     const { connection, commitment } = network;
     const prepared = record.records.filter((r) => r.phase === 'prepared' && r.label.includes(EXECUTE_LABEL));
     if (prepared.length) {
@@ -436,30 +474,44 @@ export function createWalletService({
           (s.confirmationStatus === 'finalized' || (commitment === 'confirmed' && s.confirmationStatus === 'confirmed')),
       );
       // The execute transaction also closed this send's proof account.
-      if (i >= 0) return finish(record, 'done', { executeSignature: prepared[i].signature, reclaimed: true });
+      if (i >= 0)
+        return decide(
+          'done',
+          { executeSignature: prepared[i].signature, reclaimed: true },
+          { status: 'done', signature: prepared[i].signature },
+        );
     }
     const status = await walletStatus(network, d);
     if (!status.initialized) return record;
     const intent = decodeIntent(fromHex(record.intentHex));
     if (status.state.nonce !== intent.nonce || status.state.epoch !== intent.epoch) {
       const found = await findExecution(network, record);
-      if (found) return finish(record, 'done', { executeSignature: found, executedElsewhere: true });
-      return finish(record, 'superseded', { error: SUPERSEDED_TEXT });
+      if (found)
+        return decide('done', { executeSignature: found, executedElsewhere: true }, { status: 'done', signature: found });
+      return decide(
+        'superseded',
+        { error: SUPERSEDED_TEXT },
+        { status: 'superseded', wallet: d.wallet, nonce: intent.nonce, epoch: intent.epoch },
+      );
     }
     const slot = BigInt(await connection.getSlot(commitment));
-    if (intent.expiry < slot) return finish(record, 'expired', { error: EXPIRED_TEXT });
+    if (intent.expiry < slot) return decide('expired', { error: EXPIRED_TEXT }, { status: 'expired', expiry: intent.expiry });
     return record;
   }
 
   // Closes this send's proof account (created by the fee key) and returns its rent to
   // the fee key. Safe at any stage: the program lets the uploader close its own proof.
   // For a watched discarded send: did someone execute it after all, or can it no longer run?
-  async function settleDiscarded(record, network, d) {
+  async function settleDiscarded(record, network, d, deployment) {
     const intent = decodeIntent(fromHex(record.intentHex));
     const status = await walletStatus(network, d);
     if (status.initialized && (status.state.nonce !== intent.nonce || status.state.epoch !== intent.epoch)) {
       const found = await findExecution(network, record);
-      if (found) return finish(record, 'done', { executeSignature: found, executedElsewhere: true });
+      if (found) {
+        // Until the public endpoint confirms it (custom mainnet RPC only), keep watching.
+        if (!(await corroborate(referenceFor(deployment), { status: 'done', signature: found }))) return record;
+        return finish(record, 'done', { executeSignature: found, executedElsewhere: true });
+      }
       record.watchSettled = true;
       return record;
     }
@@ -775,13 +827,8 @@ export function createWalletService({
         }
         const slot = BigInt(await network.connection.getSlot(network.commitment));
         const slots = [slot];
-        if (network.cluster === 'mainnet-beta' && deployment.rpc !== BUILT_IN['mainnet-beta'].rpc) {
-          const refConfig = { ...networkConfig({ ...deployment, rpc: BUILT_IN['mainnet-beta'].rpc }) };
-          const reference = connect
-            ? connect(refConfig)
-            : new Connection(refConfig.rpc, { commitment: 'confirmed', disableRetryOnRateLimit: true, fetch: rateLimitedFetch(fetchImpl) });
-          slots.push(await crossCheckRpc({ reference, wallet: d.wallet, intent, slot }));
-        }
+        const reference = referenceFor(deployment);
+        if (reference) slots.push(await crossCheckRpc({ reference, wallet: d.wallet, intent, slot }));
         // An expiry set from a slot reported too far ahead would make this approval usable
         // later than the user expects: refuse anything beyond the normal horizon.
         if (slots.some((s) => intent.expiry > s + EXPIRY_HORIZON_SLOTS + RPC_SLOT_TOLERANCE)) {
@@ -814,7 +861,7 @@ export function createWalletService({
         if (!record) throw new Error('This send no longer exists.');
         if (FINISHED.includes(record.status) || record.status === 'discarded') return record;
         if (!record.approval) throw new Error('Send is not signed.');
-        const { network, d } = await sendContext(record);
+        const { network, d, deployment } = await sendContext(record);
         const payer = await vault.feeKeypair();
         record.status = 'submitting';
         record.error = null;
@@ -826,15 +873,24 @@ export function createWalletService({
         };
         try {
           const result = await executeApprovals(network, payer, d, [record.approval], { onRecord });
-          // The execute transaction closed the proof account and refunded its rent.
-          finish(record, 'done', { executeSignature: result.receipt.signature, reclaimed: true });
-          record.cleanupErrors = result.cleanupErrors;
+          const signature = result.receipt.signature;
+          if (await corroborate(referenceFor(deployment), { status: 'done', signature })) {
+            // The execute transaction closed the proof account and refunded its rent.
+            finish(record, 'done', { executeSignature: signature, reclaimed: true });
+            record.cleanupErrors = result.cleanupErrors;
+          } else {
+            // Not confirmed by the public endpoint: checked like any unclear outcome, and the
+            // signed approval is kept (the nonce stops it from ever running twice).
+            record.status = 'uncertain';
+            record.uncertainSignature = signature;
+            record.error = DISAGREE_TEXT;
+          }
         } catch (error) {
           record.error = error.message;
           record.uncertainSignature = error.signature ?? null;
           record.status = error.name === 'SubmissionUncertain' ? 'uncertain' : 'failed';
           try {
-            await settle(record, network, d);
+            await settle(record, network, d, deployment);
           } catch {
             /* keep the original error */
           }
@@ -850,9 +906,10 @@ export function createWalletService({
     async checkUncertain(id) {
       const record = await getSend(id);
       if (!record?.uncertainSignature) return null;
-      const { connection } = await sendContext(record);
+      const { connection, deployment } = await sendContext(record);
+      // With a custom mainnet RPC, the public endpoint answers instead.
       const status = (
-        await connection.getSignatureStatuses([record.uncertainSignature], {
+        await (referenceFor(deployment) ?? connection).getSignatureStatuses([record.uncertainSignature], {
           searchTransactionHistory: true,
         })
       ).value[0];
@@ -891,8 +948,8 @@ export function createWalletService({
             async () => {
               const record = await getSend(candidate.id);
               if (!record) return;
-              if (UNFINISHED_SIGNED.includes(record.status) && record.approval) await settle(record, network, d);
-              if (mayStillExecute(record)) await settleDiscarded(record, network, d);
+              if (UNFINISHED_SIGNED.includes(record.status) && record.approval) await settle(record, network, d, deployment);
+              if (mayStillExecute(record)) await settleDiscarded(record, network, d, deployment);
               if (needsReclaim(record)) {
                 await tryReclaim(record, network);
                 if (record.reclaimSignature && record.reclaimed) reclaimed++;
