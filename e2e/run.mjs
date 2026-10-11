@@ -428,6 +428,8 @@ try {
   await popup.locator('nav').getByRole('button', { name: 'Activity' }).click();
   await popup.locator('.activity-row .pill.superseded').waitFor({ timeout: 30000 });
   await popup.locator('nav').getByRole('button', { name: 'Home' }).click();
+  await popup.getByRole('button', { name: 'Move to wallet' }).waitFor({ timeout: 60000 });
+  await shot(popup, '07d-home-sweep');
   await popup.getByRole('button', { name: 'Move to wallet' }).click({ timeout: 60000 });
   await popup.getByText('Moved into your wallet.').waitFor({ timeout: 60000 });
   const feeAfterMove = BigInt(await connection.getBalance(feeKey, 'confirmed'));
@@ -445,6 +447,7 @@ try {
     await popup.locator('nav').getByRole('button', { name: 'Home' }).click();
     const topUpButton = popup.getByRole('button', { name: 'Top up from wallet' });
     await topUpButton.waitFor({ timeout: 60000 });
+    await shot(popup, '07e-home-topup');
     const topUpReviewPromise = context.waitForEvent('page');
     await topUpButton.click();
     const topUpReview = await topUpReviewPromise;

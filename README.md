@@ -58,7 +58,16 @@ wrong passphrase, backup download, an injected RPC failure that leaves a send
 superseded one is reported "Not sent" and its proof deposit reclaimed, and auto-lock set
 through Settings (17 steps). `e2e/devnet-smoke.mjs` runs create, setup and a
 send against the public devnet deployment, with a funded devnet key supplied via
-`QS_DEVNET_FUNDER` (kept outside the repository).
+`QS_DEVNET_FUNDER` (kept outside the repository). `QS_E2E_SHOTS=1 npm run e2e` also
+saves a screenshot of each screen it reaches to `.runtime/shots/`.
+
+`node e2e/visual.mjs` is a visual check, not a wallet test: it bundles the real popup and
+review components against fixture data (`e2e/visual/fake-common.js` replaces
+`src/ui/common.js`; no chain, vault or extension storage) and screenshots about fifty
+states the chain e2e cannot easily reach, such as a low fee address, every Activity
+status, a failed send and the restore form, to `.runtime/shots/visual/`. With
+`QS_AXE=/path/to/axe.min.js` it also runs axe-core (WCAG 2.1 A/AA) on every state. Pass
+a pattern to render only some states: `node e2e/visual.mjs '^review'`.
 
 ## Status
 
