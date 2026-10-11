@@ -188,6 +188,8 @@ function SettingsForm({ initial, onBack, onBackup, onLock, onPassphrase, onRemov
       <p className="about">
         Quantum Seal {version} · transfers approved with SLH-DSA (FIPS 205)
         <br />
+        Open it with Alt+Shift+Q (change at chrome://extensions/shortcuts)
+        <br />
         Not independently audited.
       </p>
     </>
