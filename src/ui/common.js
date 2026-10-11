@@ -7,7 +7,41 @@ import { errorText, friendlyMessage } from '../errors.js';
 
 export const storage = { local: chrome.storage.local, session: chrome.storage.session };
 export const vault = createVaultStore(storage);
-export const service = createWalletService({ vault, storage });
+// Signs in a Web Worker (dist/signer.js) so the page keeps animating during the ~1 s
+// SLH-DSA signature; the worker gets a copy of the secret and zeroes it.
+function workerSigner() {
+  let worker = null;
+  let next = 0;
+  const pending = new Map();
+  const fail = (error) => {
+    for (const { reject } of pending.values()) reject(error);
+    pending.clear();
+    worker?.terminate();
+    worker = null;
+  };
+  return (bytes, secret) =>
+    new Promise((resolve, reject) => {
+      if (!worker) {
+        worker = new Worker(chrome.runtime.getURL('signer.js'), { type: 'module' });
+        worker.onmessage = ({ data }) => {
+          const job = pending.get(data.id);
+          if (!job) return;
+          pending.delete(data.id);
+          if (data.error) job.reject(new Error(data.error));
+          else job.resolve(data.approval);
+        };
+        worker.onerror = (event) => fail(new Error(event.message || 'The signing worker failed.'));
+      }
+      const id = ++next;
+      pending.set(id, { resolve, reject });
+      worker.postMessage({ id, bytes, secret: Uint8Array.from(secret) });
+    });
+}
+export const service = createWalletService({
+  vault,
+  storage,
+  sign: typeof Worker === 'function' ? workerSigner() : undefined,
+});
 export { lamportsToSol, SETTINGS_KEY, errorText, friendlyMessage };
 
 export async function getSettings() {

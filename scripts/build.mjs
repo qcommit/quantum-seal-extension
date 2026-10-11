@@ -77,6 +77,8 @@ const result = await build({
     popup: join(root, 'src/ui/popup.jsx'),
     review: join(root, 'src/ui/review.jsx'),
     background: join(root, 'src/background.js'),
+    // Web Worker that signs approvals off the review window's main thread.
+    signer: join(root, 'src/signer-worker.js'),
     // One stylesheet for both pages; Inter Variable is bundled from @fontsource-variable
     // as local font files, so the pages load nothing remote.
     styles: join(root, 'src/ui/styles.css'),
@@ -132,7 +134,7 @@ if (release) {
   writeFileSync(join(dist, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 }
 // The extension pages do not need WebAssembly or WebSockets; the CSP allows neither.
-for (const f of ['popup.js', 'review.js', 'background.js'])
+for (const f of ['popup.js', 'review.js', 'background.js', 'signer.js'])
   if (/\bWebAssembly\./.test(readFileSync(join(dist, f), 'utf8')))
     throw new Error(`${f} uses WebAssembly, which the extension CSP does not allow.`);
 const files = {};

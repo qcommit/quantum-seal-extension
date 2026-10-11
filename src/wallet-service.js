@@ -306,6 +306,9 @@ export function createWalletService({
   connect,
   // For tests: (deployment) => reference connection, as if a custom mainnet RPC were set.
   referenceOverride,
+  // (intentBytes, ownerSecret) => approval. Pages pass a Web Worker signer so the window
+  // stays responsive; the secret is the caller's copy and is zeroed by approve.
+  sign = async (bytes, secret) => signApproval(bytes, secret, 0),
 }) {
   let cached = null;
   // The public mainnet endpoint, when the user set a custom mainnet RPC (else null).
@@ -870,7 +873,7 @@ export function createWalletService({
         }
         const secret = await vault.ownerSecret();
         try {
-          record.approval = signApproval(bytes, secret, 0);
+          record.approval = await sign(bytes, secret);
         } finally {
           secret.fill(0);
         }

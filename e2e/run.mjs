@@ -316,11 +316,20 @@ try {
   assert.ok(tokenText.includes(recipient.toBase58()) && tokenText.includes(recipientAta.toBase58()), 'token review shows recipient and its token account');
   assert.match(tokenText, /1\.5 /);
   await shot(tokenReview, '07b-token-review');
+  // Record long main-thread tasks: signing runs in a Web Worker, so the window never freezes.
+  await tokenReview.evaluate(() => {
+    window.__longTasks = [];
+    new PerformanceObserver((list) => window.__longTasks.push(...list.getEntries().map((e) => e.duration))).observe({
+      type: 'longtask',
+    });
+  });
   await tokenReview.getByRole('button', { name: 'Approve & send' }).click();
   await tokenReview.getByText('Sent.').waitFor({ timeout: 180000 });
+  const longest = Math.max(0, ...(await tokenReview.evaluate(() => window.__longTasks)));
+  assert.ok(longest < 500, `the review window was blocked for ${Math.round(longest)} ms`);
   const tokenBalance = await connection.getTokenAccountBalance(ata(recipient), 'confirmed');
   assert.equal(tokenBalance.value.amount, '1500000');
-  step('an SPL token send completes through the review window; Activity shows sends and received transfers');
+  step('an SPL token send completes through the review window without freezing it; Activity shows sends and received transfers');
   await tokenReview.close();
   // Activity lists both sends as done.
   await popup.locator('nav').getByRole('button', { name: 'Activity' }).click();
