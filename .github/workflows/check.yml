@@ -101,8 +101,9 @@ jobs:
         run: |
           bash scripts/build-sbf.sh
           (cd target/deploy && sha256sum --check ../../PROGRAM_SHA256)
-      - name: Fetch the associated-token program (not in the validator's default genesis)
-        run: solana program dump -u mainnet-beta ATokenGPvbdGVxr1b2hvZ9zbHQBhL1v8Tq9GZy3s3pVm "$RUNNER_TEMP/ata.so"
+      - name: Check the vendored associated-token program
+        working-directory: quantum-seal-extension/e2e/fixtures
+        run: echo "e5e7aed11ad3969eea2aa76c8b4d2e73ea25be7e6b5cce989b7710cf5452496e  spl_associated_token_account-1.1.1.so" | sha256sum --check
       - run: npm ci --ignore-scripts --no-fund
         working-directory: quantum-seal-wallet
       - run: npm ci --ignore-scripts --no-fund
@@ -114,5 +115,4 @@ jobs:
         working-directory: quantum-seal-extension
         env:
           QS_SOLANA_BIN: /home/runner/.local/share/solana/install/active_release/bin
-          QS_ATA_PROGRAM: ${{ runner.temp }}/ata.so
         run: npm run build && npm run e2e

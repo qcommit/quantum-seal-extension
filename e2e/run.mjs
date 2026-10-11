@@ -30,9 +30,8 @@ const root = resolve(here, '..');
 const dist = join(root, 'dist');
 const programPath = resolve(root, '../quantum-seal-wallet/target/deploy/seal_wallet.so');
 const solanaBin = process.env.QS_SOLANA_BIN ?? join(process.env.HOME, '.local/solana/bin');
-const ataProgramPath =
-  process.env.QS_ATA_PROGRAM ??
-  join(process.env.HOME, 'src/agave-3.1.10/program-binaries/src/programs/spl_associated_token_account-1.1.1.so');
+// The associated-token program binary from Agave 3.1.10 (see e2e/fixtures/README.md).
+const ataProgramPath = process.env.QS_ATA_PROGRAM ?? join(here, 'fixtures/spl_associated_token_account-1.1.1.so');
 const RPC = 'http://127.0.0.1:8899';
 const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const ATA_PROGRAM = new PublicKey('ATokenGPvbdGVxr1b2hvZ9zbHQBhL1v8Tq9GZy3s3pVm');
