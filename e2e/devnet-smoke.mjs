@@ -68,6 +68,12 @@ try {
   assert.equal(BigInt(await connection.getBalance(recipient, 'confirmed')), 10000000n);
   const seconds = (Date.now() - started) / 1000;
   console.log(`PASS 0.01 SOL sent from the extension on devnet (${seconds.toFixed(0)} s total)`);
+  // Activity reads incoming transfers from the public RPC's history (rate-limited).
+  await review.close();
+  await popup.locator('nav').getByRole('button', { name: 'Activity' }).click();
+  await popup.locator('.activity-row .pill.done').first().waitFor({ timeout: 60000 });
+  await popup.locator('a.activity-row').filter({ hasText: 'From your fee address' }).first().waitFor({ timeout: 120000 });
+  console.log('PASS Activity lists the send and the setup funding received from the fee address');
   mkdirSync(join(root, 'evidence'), { recursive: true });
   writeFileSync(
     join(root, 'evidence/devnet-smoke.json'),
