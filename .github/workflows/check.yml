@@ -52,3 +52,11 @@ jobs:
           node -e "const m=require('./dist/manifest.json'); if(m.manifest_version!==3) process.exit(1); console.log(m.name, m.version)"
           node -e "const b=require('./dist/build-info.json'); if(!b.core.matchesPin) process.exit(1); console.log('core', b.core.commit)"
           ls -la dist
+      # Renders every UI state from fixtures (no chain, no network) and fails on any axe-core
+      # accessibility violation, failed interaction step or page error.
+      - name: Install Chromium for the UI check
+        working-directory: quantum-seal-extension
+        run: npx --no-install playwright-core install --with-deps chromium
+      - name: UI check (every screen state, accessibility scan)
+        working-directory: quantum-seal-extension
+        run: npm run visual

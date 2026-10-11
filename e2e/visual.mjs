@@ -5,7 +5,8 @@
 // src/ui/common.js is swapped for e2e/visual/fake-common.js at bundle time.
 //
 //   node e2e/visual.mjs                    # screenshots to .runtime/shots/visual/
-//   QS_AXE=/path/to/axe.min.js node e2e/visual.mjs   # also run axe-core on every scene
+//   npm run visual                         # strict: fails on axe violations, failed steps or page errors (CI)
+//   QS_AXE=0 node e2e/visual.mjs           # skip the axe-core scan (default: node_modules/axe-core)
 //   QS_SCALE=2 node e2e/visual.mjs mainnet           # 2x screenshots (for store assets)
 //
 // It is a look-and-feel aid, not a test of wallet behaviour: run `npm run e2e` for that.
@@ -178,7 +179,9 @@ const SCENES = [
   ['review-done-mainnet', 'review', 'review-mainnet&id=done', REVIEW],
 ];
 
-const axePath = process.env.QS_AXE;
+const axePath = process.env.QS_AXE === '0' ? null : (process.env.QS_AXE ?? join(root, 'node_modules/axe-core/axe.min.js'));
+const strict = process.env.QS_STRICT === '1';
+const problems = [];
 const axe = axePath && existsSync(axePath) ? readFileSync(axePath, 'utf8') : null;
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const browser = await chromium.launch({ channel: 'chromium', headless: true });
@@ -205,11 +208,15 @@ try {
       }
     } catch (error) {
       console.log(`${name}: step failed: ${error.message.split('\n')[0]}`);
+      problems.push(`${name}: step failed`);
     }
     await p.evaluate(() => document.fonts.ready);
     await p.waitForTimeout(300);
     await p.screenshot({ path: join(shots, `${name}.png`) });
-    if (errors.length) console.log(`${name}: page errors: ${errors.join(' | ')}`);
+    if (errors.length) {
+      console.log(`${name}: page errors: ${errors.join(' | ')}`);
+      problems.push(`${name}: page errors`);
+    }
     if (axe) {
       await p.addScriptTag({ content: axe });
       const result = await p.evaluate(() =>
@@ -228,4 +235,9 @@ if (axe) {
   const ids = Object.keys(violations);
   console.log(ids.length ? `axe: ${ids.length} rule(s) violated` : 'axe: no violations');
   for (const id of ids) console.log(`  ${id}\n    ${[...new Set(violations[id])].slice(0, 12).join('\n    ')}`);
+  for (const id of ids) problems.push(`axe: ${id}`);
+}
+if (strict && problems.length) {
+  console.error(`Visual check failed: ${problems.join('; ')}`);
+  process.exitCode = 1;
 }
