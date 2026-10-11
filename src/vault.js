@@ -192,6 +192,39 @@ export function createVaultStore(storage) {
         exportedAt: new Date().toISOString(),
       };
     },
+    // Re-encrypts both keys under a new passphrase. The current one must open them first.
+    // Backup files saved earlier keep the passphrase they were saved with.
+    async changePassphrase(current, next) {
+      return withLock('vault', async () => {
+        const vault = await read();
+        if (!vault) throw new Error('No wallet in this browser profile.');
+        const owner = await decryptKey(vault.owner, current);
+        const fee = await decryptKey(vault.fee, current, FEE_KEY_ALGORITHM);
+        try {
+          if (hex(owner.slice(32)) !== vault.owner.publicKey) throw new Error('Unable to unlock keystore.');
+          if ((await Keypair.fromSecretKey(fee)).publicKey.toBase58() !== vault.feePayer)
+            throw new Error('Unable to unlock keystore.');
+          await storage.local.set({
+            [VAULT_KEY]: {
+              ...vault,
+              owner: await encryptKey(owner, next),
+              fee: await encryptKey(fee, next, FEE_KEY_ALGORITHM),
+              passphraseChangedAt: new Date().toISOString(),
+            },
+          });
+        } finally {
+          owner.fill(0);
+          fee.fill(0);
+        }
+      });
+    },
+    // Deletes the keys from this browser profile (encrypted and unlocked copies).
+    async remove() {
+      return withLock('vault', async () => {
+        await storage.session.remove(SESSION_KEY);
+        await storage.local.remove(VAULT_KEY);
+      });
+    },
     // Called once the backup file has been handed to the browser to save. One backup
     // covers every wallet address: they are re-derived from the owner key on restore.
     async markBackedUp() {

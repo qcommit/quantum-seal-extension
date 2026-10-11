@@ -22,7 +22,7 @@ through its own approved-transfer format. dApp support needs its own design.
 | Interruptions | Each send is journaled under its own storage key and runs under a Web Lock, so it is approved once and run by one window at a time. Closing the window or losing the network resumes from on-chain state with the same signed approval; an unclear outcome is checked by signature before anything continues. Nothing is re-signed. A send is marked sent only on evidence of its execute transaction; if the wallet moved on without it, it is shown as "Not sent". |
 | Deposits | A send whose approval can no longer run (superseded, expired or discarded) has its proof account closed, so the rent deposit returns to the fee key. The popup does this for leftover sends each time it opens. |
 | Backup | Downloads the encrypted keys plus the public wallet descriptors. On restore, every descriptor must be a wallet owned by the backup's key alone (threshold 1, no guardian); anything else is refused. The owner key in the backup also opens with the core command line. |
-| Settings | Network is picked from the header (mainnet once released, devnet, local validator). Settings holds the RPC endpoint, auto-lock time, developer pins for test networks, backup and lock. Mainnet deployment pins are fixed by the release. |
+| Settings | Network is picked from the header (mainnet once released, devnet, local validator). Settings holds the RPC endpoint, auto-lock time, developer pins for test networks, backup, lock, passphrase change and removing the wallet from the browser (also reachable from the lock screen as "Forgot passphrase?", which leads to restoring a backup). Mainnet deployment pins are fixed by the release. |
 
 Every chain write goes through the core SDK, which re-verifies the deployed program's
 bytes against the pinned SHA-256 before each transaction and refuses mutable programs
@@ -56,7 +56,7 @@ that is interrupted mid-upload and resumed, an SPL token send, lock and unlock w
 wrong passphrase, backup download, an injected RPC failure that leaves a send
 "uncertain" until it is checked and resumed, two sends at the same nonce where the
 superseded one is reported "Not sent" and its proof deposit reclaimed, and auto-lock set
-through Settings (17 steps). `e2e/devnet-smoke.mjs` runs create, setup and a
+through Settings, passphrase change, and forgot-passphrase recovery from the backup (19 steps). `e2e/devnet-smoke.mjs` runs create, setup and a
 send against the public devnet deployment, with a funded devnet key supplied via
 `QS_DEVNET_FUNDER` (kept outside the repository). `QS_E2E_SHOTS=1 npm run e2e` also
 saves a screenshot of each screen it reaches to `.runtime/shots/`.

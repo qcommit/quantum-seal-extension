@@ -19,8 +19,9 @@ network requests go to the Solana RPC endpoint you use.
   interrupted sends can resume, and a cache of incoming transfers read from the chain for
   the Activity tab. These are public blockchain data.
 
-Nothing is synced to any cloud service by the extension. Uninstalling the extension or
-clearing its data deletes all of it, so keep a backup file.
+Nothing is synced to any cloud service by the extension. Removing the wallet in Settings
+(or from the lock screen), uninstalling the extension, or clearing its data deletes it, so
+keep a backup file.
 
 ## What leaves your device
 

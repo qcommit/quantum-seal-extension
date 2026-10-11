@@ -1,9 +1,9 @@
 // Settings (RPC override, auto-lock, developer pins, backup, lock) and the backup page.
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { BUILT_IN, deploymentFor, isAvailable, networkConfig } from '../networks.js';
-import { vault, getSettings, saveSettings, touch } from './common.js';
-import { ActionButton, ActionNotice, Field, Loading, useAction, useLoad } from './components.jsx';
-import { ArrowLeft, ChevronRight, Code, Download, Key, Lock } from './icons.jsx';
+import { vault, service, getSettings, saveSettings, touch, solDisplay } from './common.js';
+import { ActionButton, ActionNotice, Field, Loading, Notice, useAction, useLoad } from './components.jsx';
+import { Alert, ArrowLeft, ChevronRight, Code, Download, Key, Lock, Shield } from './icons.jsx';
 
 const PIN_FIELDS = [
   ['program', 'Program address'],
@@ -13,13 +13,22 @@ const PIN_FIELDS = [
   ['genesis', 'Genesis hash'],
 ];
 
-export function SettingsPage({ onBack, onBackup, onLock }) {
+export function SettingsPage({ onBack, onBackup, onLock, onPassphrase, onRemove }) {
   const loaded = useLoad(() => getSettings(), []);
   if (!loaded.data) return <Loading label="Loading settings" />;
-  return <SettingsForm initial={loaded.data} onBack={onBack} onBackup={onBackup} onLock={onLock} />;
+  return (
+    <SettingsForm
+      initial={loaded.data}
+      onBack={onBack}
+      onBackup={onBackup}
+      onLock={onLock}
+      onPassphrase={onPassphrase}
+      onRemove={onRemove}
+    />
+  );
 }
 
-function SettingsForm({ initial, onBack, onBackup, onLock }) {
+function SettingsForm({ initial, onBack, onBackup, onLock, onPassphrase, onRemove }) {
   const cluster = initial.cluster;
   const network = BUILT_IN[cluster];
   const current = deploymentFor(initial);
@@ -158,6 +167,22 @@ function SettingsForm({ initial, onBack, onBackup, onLock }) {
             <small>Your passphrase is needed to unlock</small>
           </span>
         </button>
+        <button type="button" className="menu-row" onClick={onPassphrase}>
+          <Shield size={18} />
+          <span>
+            Change passphrase
+            <small>Re-encrypts your keys on this device</small>
+          </span>
+          <ChevronRight size={16} />
+        </button>
+        <button type="button" className="menu-row danger" onClick={onRemove}>
+          <Alert size={18} />
+          <span>
+            Remove from this browser
+            <small>Deletes the keys here; restore later from your backup</small>
+          </span>
+          <ChevronRight size={16} />
+        </button>
       </div>
 
       <p className="about">
@@ -207,6 +232,129 @@ export function BackupPage({ onBack }) {
         </ActionButton>
         <ActionNotice notice={notice} />
       </div>
+    </>
+  );
+}
+
+function PageHeading({ title, onBack }) {
+  return (
+    <div className="page-heading with-back">
+      <button type="button" className="icon-button" aria-label="Back" onClick={onBack}>
+        <ArrowLeft size={18} />
+      </button>
+      <h1>{title}</h1>
+    </div>
+  );
+}
+
+// Passphrase inputs are uncontrolled and cleared after use, as on the welcome screen.
+export function PassphrasePage({ onBack }) {
+  const current = useRef(null);
+  const next = useRef(null);
+  const repeat = useRef(null);
+  const { busy, notice, run } = useAction();
+  const change = () =>
+    run(async () => {
+      const value = next.current.value;
+      if ([...value].length < 12) throw new Error('Use a long passphrase of at least 12 characters.');
+      if (value !== repeat.current.value) throw new Error('The new passphrases do not match.');
+      try {
+        await vault.changePassphrase(current.current.value, value);
+      } catch (error) {
+        if (error?.message === 'Unable to unlock keystore.') {
+          current.current.select();
+          throw new Error('The current passphrase is wrong.');
+        }
+        throw error;
+      }
+      for (const r of [current, next, repeat]) r.current.value = '';
+      return 'Passphrase changed. Backup files saved earlier still open with the old passphrase.';
+    });
+  return (
+    <>
+      <PageHeading title="Change passphrase" onBack={onBack} />
+      <div className="form-stack">
+        <input
+          ref={current}
+          className="text-input"
+          type="password"
+          aria-label="Current passphrase"
+          placeholder="Current passphrase"
+          autoComplete="current-password"
+          autoFocus
+        />
+        <input
+          ref={next}
+          className="text-input"
+          type="password"
+          aria-label="New passphrase"
+          placeholder="New passphrase (12+ characters)"
+          autoComplete="new-password"
+        />
+        <input
+          ref={repeat}
+          className="text-input"
+          type="password"
+          aria-label="Repeat new passphrase"
+          placeholder="Repeat new passphrase"
+          autoComplete="new-password"
+          onKeyDown={(e) => e.key === 'Enter' && change()}
+        />
+        <ActionButton busy={busy} onClick={change}>
+          Change passphrase
+        </ActionButton>
+        <ActionNotice notice={notice} />
+      </div>
+    </>
+  );
+}
+
+// Removing the wallet, from Settings or from the lock screen ("Forgot passphrase?").
+export function RemoveWallet({ onRemoved, intro }) {
+  const [ack, setAck] = useState(false);
+  const open = useLoad(() => service.unfinishedSends(), []);
+  const { busy, notice, run } = useAction();
+  const remove = () =>
+    run(async () => {
+      await service.removeWallet({ evenWithUnfinished: true });
+      onRemoved();
+    });
+  const pending = open.data?.count ?? 0;
+  return (
+    <div className="form-stack remove-wallet">
+      <div className="setting-panel prose">
+        {intro}
+        <p>
+          This deletes your keys and send history from this browser. Your funds stay on Solana: restore your backup file
+          (with its passphrase) here or in another browser to use them again. <strong>Without the backup, they cannot be
+          recovered.</strong>
+        </p>
+      </div>
+      {pending ? (
+        <Notice kind="warn">
+          {pending} send{pending === 1 ? ' is' : 's are'} not finished
+          {open.data.lamports > 0n ? `, holding ${solDisplay(open.data.lamports, 6)} SOL in proof deposits` : ''}. Finish
+          or discard {pending === 1 ? 'it' : 'them'} in Activity first if you can; after removing, restoring the backup
+          does not bring {pending === 1 ? 'it' : 'them'} back.
+        </Notice>
+      ) : null}
+      <label className="check-row">
+        <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+        <span>I have my backup file and its passphrase.</span>
+      </label>
+      <ActionButton className="danger full" busy={busy} disabled={!ack || open.loading} onClick={remove}>
+        Remove wallet from this browser
+      </ActionButton>
+      <ActionNotice notice={notice} />
+    </div>
+  );
+}
+
+export function RemovePage({ onBack, onRemoved }) {
+  return (
+    <>
+      <PageHeading title="Remove wallet" onBack={onBack} />
+      <RemoveWallet onRemoved={onRemoved} />
     </>
   );
 }

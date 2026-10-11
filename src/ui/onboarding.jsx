@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import { vault } from './common.js';
 import { ActionButton, ActionNotice, Mark, useAction } from './components.jsx';
+import { RemoveWallet } from './settings.jsx';
 import { Check, Shield, Upload } from './icons.jsx';
 
 const MIN_PASSPHRASE = 12;
@@ -151,6 +152,33 @@ function RestoreForm({ onDone }) {
 }
 
 export function Unlock({ onDone }) {
+  const [forgot, setForgot] = useState(false);
+  if (forgot)
+    return (
+      <div className="gate">
+        <main className="gate-body">
+          <div className="page-heading">
+            <h1>Forgot your passphrase?</h1>
+          </div>
+          <RemoveWallet
+            onRemoved={onDone}
+            intro={
+              <p>
+                Nobody can recover it: the passphrase is what decrypts your keys. To get back in, remove the wallet from
+                this browser and restore it from your backup file.
+              </p>
+            }
+          />
+          <button type="button" className="ghost full" onClick={() => setForgot(false)}>
+            Back to unlock
+          </button>
+        </main>
+      </div>
+    );
+  return <UnlockForm onDone={onDone} onForgot={() => setForgot(true)} />;
+}
+
+function UnlockForm({ onDone, onForgot }) {
   const pass = useRef(null);
   const { busy, notice, run } = useAction();
   const unlock = () =>
@@ -190,6 +218,9 @@ export function Unlock({ onDone }) {
             Unlock
           </ActionButton>
           <ActionNotice notice={notice} />
+          <button type="button" className="link-button" onClick={onForgot}>
+            Forgot passphrase?
+          </button>
         </div>
       </main>
       <footer className="gate-foot">Quantum Seal locks itself after a period of inactivity.</footer>

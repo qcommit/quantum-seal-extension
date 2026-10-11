@@ -303,6 +303,9 @@ export function createWalletService({
       .filter(([k]) => isSendKey(k))
       .map(([, v]) => v);
   }
+  async function openSends() {
+    return (await allSends()).filter((r) => UNFINISHED_SIGNED.includes(r.status) || needsReclaim(r));
+  }
   async function getSend(id) {
     await migrate();
     return (await storage.local.get(sendKey(id)))[sendKey(id)] ?? null;
@@ -880,6 +883,30 @@ export function createWalletService({
           })),
         )
         .sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''));
+    },
+    // Sends that still hold something on-chain or may still run: removing the wallet's
+    // journal would leave their proof deposits to be found by hand.
+    async unfinishedSends() {
+      const open = await openSends();
+      const lamports = open.reduce((sum, r) => sum + BigInt(r.refundableRentLamports ?? '0'), 0n);
+      return { count: open.length, lamports };
+    },
+    // Removes the wallet from this browser profile: keys, send journal and cached history.
+    // Settings (network, RPC endpoint, auto-lock) stay. Refuses while sends are unfinished
+    // unless the caller has shown that to the user and they chose to go ahead.
+    async removeWallet({ evenWithUnfinished = false } = {}) {
+      const count = (await openSends()).length;
+      if (count && !evenWithUnfinished)
+        throw new Error(
+          `${count} send${count === 1 ? ' is' : 's are'} not finished. Open Activity to finish or discard ${count === 1 ? 'it' : 'them'} first.`,
+        );
+      await vault.remove();
+      const all = await storage.local.get(null);
+      const keys = Object.keys(all).filter(
+        (k) => isSendKey(k) || k.startsWith(RECEIPTS_PREFIX) || k === LEGACY_SENDS_KEY,
+      );
+      if (keys.length) await storage.local.remove(keys);
+      cached = null;
     },
     async listSends() {
       return (await allSends()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));

@@ -181,3 +181,32 @@ test('two concurrent creates leave one vault whose keys match the session', asyn
   const created = results.find((r) => r.status === 'fulfilled').value;
   assert.equal((await vault.feeKeypair()).publicKey.toBase58(), created.feePayer);
 });
+
+test('changing the passphrase re-encrypts both keys; the old one stops working', async () => {
+  const storage = fakeStorage();
+  const vault = createVaultStore(storage);
+  const created = await vault.create(pass);
+  const backup = await vault.exportBackup();
+  await assert.rejects(vault.changePassphrase('not the passphrase', 'a brand new passphrase'), /Unable to unlock/);
+  await assert.rejects(vault.changePassphrase(pass, 'short'), /at least 12/);
+  await vault.changePassphrase(pass, 'a brand new passphrase');
+  await vault.lock();
+  await assert.rejects(vault.unlock(pass), /Unable to unlock/);
+  await vault.unlock('a brand new passphrase');
+  assert.equal(hex((await vault.ownerSecret()).slice(32)), created.ownerPublicKey);
+  assert.equal((await vault.feeKeypair()).publicKey.toBase58(), created.feePayer);
+  // A backup saved before the change still opens with the passphrase it was saved with.
+  await createVaultStore(fakeStorage()).importBackup(JSON.stringify(backup), pass);
+});
+
+test('remove deletes the encrypted and the unlocked keys', async () => {
+  const storage = fakeStorage();
+  const vault = createVaultStore(storage);
+  await vault.create(pass);
+  assert.equal(await vault.isUnlocked(), true);
+  await vault.remove();
+  assert.equal(await vault.exists(), false);
+  assert.equal(await vault.isUnlocked(), false);
+  assert.deepEqual(storage.local.dump(), {});
+  await vault.create(pass);
+});

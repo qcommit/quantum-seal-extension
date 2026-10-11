@@ -487,3 +487,18 @@ test('listReceipts lists incoming transfers and fetches each transaction once', 
   assert.equal((await t.service.listReceipts()).length, 2);
   assert.equal(fetched, 3);
 });
+
+test('removeWallet refuses while a send holds a deposit, then clears keys, journal and history', async () => {
+  const t = await setup();
+  const { record } = await interruptedSend(t);
+  await t.storage.local.set({ 'receipts:localnet:x': {} });
+  const open = await t.service.unfinishedSends();
+  assert.equal(open.count, 1);
+  assert.ok(open.lamports > 0n);
+  await assert.rejects(t.service.removeWallet(), /1 send is not finished/);
+  assert.equal(await t.vault.exists(), true);
+  await t.service.removeWallet({ evenWithUnfinished: true });
+  assert.equal(await t.vault.exists(), false);
+  assert.deepEqual(Object.keys(t.storage.local.dump()), ['settings']);
+  assert.equal(await stored(t.storage, record.id), undefined);
+});

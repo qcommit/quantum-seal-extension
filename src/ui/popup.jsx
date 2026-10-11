@@ -29,7 +29,7 @@ import { Check, ChevronDown, Gear, Globe, History, Home, Lock } from './icons.js
 import { Welcome, Unlock } from './onboarding.jsx';
 import { HomeTab, ActivityTab } from './home.jsx';
 import { SendPage } from './send.jsx';
-import { SettingsPage, BackupPage } from './settings.jsx';
+import { SettingsPage, BackupPage, PassphrasePage, RemovePage } from './settings.jsx';
 
 function App() {
   const [gate, setGate] = useState('loading');
@@ -63,11 +63,11 @@ function App() {
   if (gate === 'welcome') return <Welcome onDone={checkGate} />;
   if (gate === 'locked') return <Unlock onDone={checkGate} />;
   // A fresh wallet shell after every unlock: it always opens on Home.
-  return <Wallet onLock={lock} />;
+  return <Wallet onLock={lock} onRemoved={checkGate} />;
 }
 
-function Wallet({ onLock }) {
-  const [page, setPage] = useState('home'); // home | activity | send | settings | backup
+function Wallet({ onLock, onRemoved }) {
+  const [page, setPage] = useState('home'); // home | activity | send | settings | backup | passphrase | remove
   const [sheet, setSheet] = useState(null); // network | receive
   const [reloadKey, setReloadKey] = useState(0);
   const [initialized, setInitialized] = useState(null);
@@ -116,7 +116,7 @@ function Wallet({ onLock }) {
     setPage(next);
     if (next === 'home') setReloadKey((k) => k + 1);
   };
-  const inSettings = page === 'settings' || page === 'backup';
+  const inSettings = ['settings', 'backup', 'passphrase', 'remove'].includes(page);
   const showNav = initialized !== false || page !== 'home';
 
   return (
@@ -176,9 +176,13 @@ function Wallet({ onLock }) {
             go('backup');
           }}
           onLock={onLock}
+          onPassphrase={() => go('passphrase')}
+          onRemove={() => go('remove')}
         />
         ) : null}
         {page === 'backup' ? <BackupPage onBack={() => go(backupReturn.current)} /> : null}
+        {page === 'passphrase' ? <PassphrasePage onBack={() => go('settings')} /> : null}
+        {page === 'remove' ? <RemovePage onBack={() => go('settings')} onRemoved={onRemoved} /> : null}
       </main>
 
       {showNav ? (

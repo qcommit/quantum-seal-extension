@@ -67,6 +67,7 @@ export const vault = {
     return { feePayer: FEE, backedUp: !(scene === 'home-nobackup' || scene.startsWith('setup')) };
   },
   async markBackedUp() {},
+  changePassphrase: fail('Unable to unlock keystore.'),
   exportBackup: never,
   async lock() {},
 };
@@ -230,6 +231,10 @@ export const service = {
   async getSend(id) {
     return (await sends()).find((s) => s.id === id) ?? null;
   },
+  async unfinishedSends() {
+    return scene === 'home' ? { count: 1, lamports: 56911920n } : { count: 0, lamports: 0n };
+  },
+  removeWallet: never,
   async listReceipts() {
     if (scene === 'activity-empty') return [];
     if (scene === 'activity-receipts-error') throw new Error('Failed to fetch');

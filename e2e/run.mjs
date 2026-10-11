@@ -37,6 +37,7 @@ const RPC = 'http://127.0.0.1:8899';
 const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const ATA_PROGRAM = new PublicKey('ATokenGPvbdGVxr1b2hvZ9zbHQBhL1v8Tq9GZy3s3pVm');
 const PASS = 'e2e test passphrase 123';
+const NEW_PASS = 'a changed e2e passphrase';
 const results = [];
 const step = (name) => {
   results.push(name);
@@ -485,7 +486,9 @@ try {
   const downloadPromise = popup.waitForEvent('download');
   await popup.getByRole('button', { name: 'Download backup' }).click();
   const download = await downloadPromise;
-  const backup = JSON.parse(readFileSync(await download.path(), 'utf8'));
+  const backupFile = join(work, 'backup.json');
+  await download.saveAs(backupFile);
+  const backup = JSON.parse(readFileSync(backupFile, 'utf8'));
   assert.equal(backup.format, 'quantum-seal/extension-backup/1');
   assert.equal(backup.owner.format, 'quantum-seal/keystore/1');
   assert.ok(backup.descriptors.localnet.some((d) => d.wallet === walletAddress.toBase58()));
@@ -494,6 +497,22 @@ try {
   await popup.locator('.balance .amount').waitFor({ timeout: 60000 });
   assert.equal(await popup.getByText('Back up your wallet').count(), 0);
   step('backup downloads encrypted keys plus the wallet descriptor; the Home reminder clears');
+
+  // 9b. Change the passphrase (a wrong current one is refused).
+  await popup.getByRole('button', { name: 'Settings', exact: true }).click();
+  await popup.getByRole('button', { name: /Change passphrase/ }).click();
+  await popup.getByLabel('Current passphrase').fill('not the passphrase');
+  await popup.getByLabel('New passphrase', { exact: true }).fill(NEW_PASS);
+  await popup.getByLabel('Repeat new passphrase').fill(NEW_PASS);
+  await popup.getByRole('button', { name: 'Change passphrase', exact: true }).click();
+  await popup.getByText('The current passphrase is wrong.').waitFor({ timeout: 60000 });
+  await popup.getByLabel('Current passphrase').fill(PASS);
+  await popup.getByLabel('New passphrase', { exact: true }).fill(NEW_PASS);
+  await popup.getByLabel('Repeat new passphrase').fill(NEW_PASS);
+  await popup.getByRole('button', { name: 'Change passphrase', exact: true }).click();
+  await popup.getByText(/Passphrase changed/).waitFor({ timeout: 60000 });
+  await popup.locator('nav').getByRole('button', { name: 'Home' }).click();
+  step('the passphrase changes only with the current one');
 
   // 10. Settings UI and auto-lock: set one minute, stay idle, and the wallet locks itself.
   await popup.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -509,6 +528,29 @@ try {
   await popup.reload();
   await popup.getByRole('heading', { name: 'Welcome back' }).waitFor({ timeout: 30000 });
   step('settings save through the UI and the wallet auto-locks after the idle period');
+
+  // 11. Forgot passphrase: the old one no longer unlocks; remove the wallet from this
+  // browser, restore the backup (saved before the change, so its passphrase is the old
+  // one) and land on the same wallet with its balance.
+  await popup.getByPlaceholder('Passphrase').fill(PASS);
+  await popup.getByRole('button', { name: 'Unlock' }).click();
+  await popup.getByText('Wrong passphrase. Check it and try again.').waitFor({ timeout: 30000 });
+  await popup.getByRole('button', { name: 'Forgot passphrase?' }).click();
+  const removeButton = popup.getByRole('button', { name: 'Remove wallet from this browser' });
+  assert.equal(await removeButton.isDisabled(), true);
+  await popup.getByLabel('I have my backup file and its passphrase.').check();
+  await removeButton.click();
+  await popup.getByRole('tab', { name: 'From backup' }).click({ timeout: 30000 });
+  const left = await popup.evaluate(async () => Object.keys(await chrome.storage.local.get(null)));
+  assert.deepEqual(left, ['settings']);
+  await popup.getByLabel('Backup file').setInputFiles(backupFile);
+  await popup.getByLabel('Backup passphrase').fill(PASS);
+  await popup.getByRole('button', { name: 'Restore wallet' }).click();
+  await popup.locator('.balance .amount').waitFor({ timeout: 120000 });
+  const restored = await popup.evaluate(async () => (await chrome.storage.local.get('vault')).vault);
+  assert.ok(restored.descriptors.localnet.some((d) => d.wallet === walletAddress.toBase58()));
+  assert.equal(restored.feePayer, backup.feePayer);
+  step('forgot passphrase: remove the wallet, restore the backup, and the same wallet returns');
 
   mkdirSync(join(root, 'evidence'), { recursive: true });
   writeFileSync(

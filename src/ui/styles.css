@@ -463,3 +463,15 @@ dialog.sheet[open]::backdrop { animation: fade .2s ease-out; }
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   .spinner, .btn-spinner { animation: spin 1.6s linear infinite !important; }
 }
+
+/* Removing the wallet: a deliberate, clearly destructive action. */
+.danger { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: var(--r-md); font-size: 13px; font-weight: 600; background: #3a1f28; color: #ffb0bf; box-shadow: inset 0 0 0 1px #ff8ea440; }
+.danger:not(:disabled):hover { background: #47232f; }
+.danger:disabled { opacity: .5; cursor: not-allowed; }
+.menu-row.danger { display: flex; min-height: 0; padding: 13px 14px; border-radius: 0; font-weight: 400; background: none; box-shadow: none; color: var(--red); justify-content: flex-start; }
+.menu-row.danger span { color: var(--red); }
+.menu-row.danger:hover { background: var(--surface-hover); }
+.check-row { display: flex; align-items: flex-start; gap: 10px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; line-height: 1.45; }
+.check-row input { width: 16px; height: 16px; margin: 1px 0 0; accent-color: var(--accent); flex-shrink: 0; }
+.link-button { align-self: center; padding: 6px 8px; font-size: 12px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; border-radius: 6px; }
+.link-button:hover { color: var(--ink-2); }
