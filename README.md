@@ -18,7 +18,7 @@ through its own approved-transfer format. dApp support needs its own design.
 | Home | SOL balance, Receive and Send, classic SPL token balances, and the fee-key status with a top-up prompt when it runs low. An Activity tab lists every send with its status. |
 | Receive | The wallet address with a QR code, in a bottom sheet. Each network's address is derived from the owner key and the pinned deployment, so a backup always recovers it. Test networks show a persistent "Test network" banner. |
 | Send | SOL or classic SPL tokens. The fee key's balance is checked before review. The review window decodes the intent bytes; approving signs only if the stored bytes still have the digest the window showed and the wallet, program, network, fee refill and expiry check out. Signing takes about a second; progress is shown through the 12 transactions. |
-| Fees | You pay network fees from the fee key. Each send carries a signed fee refund (65,000 lamports) that the wallet pays back to the fee key, so it stays topped up. |
+| Fees | You pay network fees from the fee key. Each send carries a signed fee refill (65,000 lamports) that the wallet pays back to the fee key, so it stays topped up. If it falls below its 0.07 SOL float but can still fund a send, Home offers **Top up from wallet**: a sealed transfer from the wallet to your own fee key, reviewed like any send. Only if it cannot fund even one send does it need SOL from outside. |
 | Interruptions | Each send is journaled under its own storage key and runs under a Web Lock, so it is approved once and run by one window at a time. Closing the window or losing the network resumes from on-chain state with the same signed approval; an unclear outcome is checked by signature before anything continues. Nothing is re-signed. A send is marked sent only on evidence of its execute transaction; if the wallet moved on without it, it is shown as "Not sent". |
 | Deposits | A send whose approval can no longer run (superseded, expired or discarded) has its proof account closed, so the rent deposit returns to the fee key. The popup does this for leftover sends each time it opens. |
 | Backup | Downloads the encrypted keys plus the public wallet descriptors. On restore, every descriptor must be a wallet owned by the backup's key alone (threshold 1, no guardian); anything else is refused. The owner key in the backup also opens with the core command line. |
@@ -56,7 +56,7 @@ that is interrupted mid-upload and resumed, an SPL token send, lock and unlock w
 wrong passphrase, backup download, an injected RPC failure that leaves a send
 "uncertain" until it is checked and resumed, two sends at the same nonce where the
 superseded one is reported "Not sent" and its proof deposit reclaimed, and auto-lock set
-through Settings (16 steps). `e2e/devnet-smoke.mjs` runs create, setup and a
+through Settings (17 steps). `e2e/devnet-smoke.mjs` runs create, setup and a
 send against the public devnet deployment, with a funded devnet key supplied via
 `QS_DEVNET_FUNDER` (kept outside the repository).
 

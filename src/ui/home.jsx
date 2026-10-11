@@ -34,6 +34,7 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
   const [poll, setPoll] = useState(0);
   const setup = useAction();
   const sweep = useAction();
+  const topUp = useAction();
   const overview = useLoad(() => service.overview(), [reloadKey, poll]);
   const o = overview.data;
   const initialized = o?.initialized;
@@ -162,6 +163,35 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
           <code className="mono">{o.feePayer}</code>
           <CopyButton text={o.feePayer} label="Copy fee-key address" />
         </div>
+      ) : o.topUpLamports > 0n ? (
+        <div className="fee-card low" role="status">
+          <div className="fee-card-top">
+            <span className="fee-icon">
+              <Fuel size={18} />
+            </span>
+            <p>
+              Fee key below its {solDisplay(FEE_FLOAT_LAMPORTS, 3)} SOL float
+              <span>
+                {solDisplay(o.feeLamports, 6)} SOL left. Refill {solDisplay(o.topUpLamports, 6)} SOL from your wallet with a
+                sealed transfer you review first.
+              </span>
+            </p>
+          </div>
+          <button
+            type="button"
+            className="secondary"
+            disabled={topUp.busy}
+            onClick={() =>
+              topUp.run(async () => {
+                const record = await service.topUpFeeKey();
+                await openReview(record.id);
+                return 'Review window opened.';
+              }, 'Preparing the top-up…')
+            }
+          >
+            Top up from wallet
+          </button>
+        </div>
       ) : (
         <div className="fee-card ok">
           <span className="fee-icon">
@@ -174,6 +204,7 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
           <span className="status-dot" aria-hidden="true" />
         </div>
       )}
+      <ActionNotice notice={topUp.notice} />
 
       <div className="assurance">
         <Shield size={20} />

@@ -155,6 +155,17 @@ export function pickTokenSource(accounts, associated, needed) {
 }
 const label = (cluster) => BUILT_IN[cluster]?.label ?? cluster;
 
+// Refilling the fee key from the wallet is itself a sealed send, so it is offered only when
+// the fee key can still fund one send (proof deposit + fees) and is meaningfully below its
+// float, and the wallet can pay the top-up plus that send's own fee refill.
+export const TOP_UP_MINIMUM_LAMPORTS = 5000000n;
+export function topUpAmount({ initialized, feeLamports, requiredLamports, availableLamports }) {
+  if (!initialized || feeLamports < requiredLamports) return 0n;
+  const shortfall = FEE_FLOAT_LAMPORTS - feeLamports;
+  if (shortfall < TOP_UP_MINIMUM_LAMPORTS) return 0n;
+  return availableLamports >= shortfall + FEE_REFUND_LAMPORTS ? shortfall : 0n;
+}
+
 export function createWalletService({
   vault,
   storage,
@@ -463,9 +474,29 @@ export function createWalletService({
         feeNeededLamports: cost.requiredPayerLamports,
         // Fee-key SOL above the float, e.g. left over from an interrupted setup.
         sweepableLamports: sweepable,
+        // Fee-key SOL missing from the float that the wallet can refill with a sealed send.
+        topUpLamports: topUpAmount({
+          initialized: status.initialized,
+          feeLamports,
+          requiredLamports: cost.requiredPayerLamports,
+          availableLamports: status.availableLamports,
+        }),
         otherWallets,
         tokens,
       };
+    },
+
+    // Prepares a sealed transfer from the wallet to the user's own fee key that brings it
+    // back to its float. It goes through the same review window as any send.
+    async topUpFeeKey() {
+      const o = await this.overview();
+      if (!o.topUpLamports)
+        throw new Error(
+          o.feeLamports < o.feeNeededLamports
+            ? `Your fee address needs SOL from outside the wallet first: send at least ${lamportsToSol(o.feeNeededLamports - o.feeLamports)} SOL to ${o.feePayer}.`
+            : 'Your fee address is already topped up.',
+        );
+      return this.prepareSend({ asset: 'SOL', to: o.feePayer, amount: lamportsToSol(o.topUpLamports) });
     },
 
     // One-address onboarding: the user funds the fee key once; this creates the wallet

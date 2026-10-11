@@ -434,6 +434,30 @@ try {
   assert.ok(feeAfterMove >= 69900000n && feeAfterMove <= 70000000n, `fee float ${feeAfterMove}`);
   step('a send superseded by another at the same nonce is reported "Not sent" and its proof deposit is reclaimed');
 
+  // 7c. Fee key below its float: the extension refills it from the wallet with a sealed send.
+  {
+    const secretHex = await popup.evaluate(async () => (await chrome.storage.session.get('unlocked')).unlocked.fee);
+    const feeSigner = await Keypair.fromSecretKey(Uint8Array.from(secretHex.match(/../g).map((h) => parseInt(h, 16))));
+    assert.ok(feeSigner.publicKey.equals(feeKey));
+    // Spend 0.009 SOL from the fee key (as fees would over time), leaving it below 0.07 SOL.
+    await send([SystemProgram.transfer({ fromPubkey: feeKey, toPubkey: funder.publicKey, lamports: 9000000n })], [feeSigner]);
+    const before = BigInt(await connection.getBalance(feeKey, 'confirmed'));
+    await popup.locator('nav').getByRole('button', { name: 'Home' }).click();
+    const topUpButton = popup.getByRole('button', { name: 'Top up from wallet' });
+    await topUpButton.waitFor({ timeout: 60000 });
+    const topUpReviewPromise = context.waitForEvent('page');
+    await topUpButton.click();
+    const topUpReview = await topUpReviewPromise;
+    await topUpReview.waitForLoadState();
+    assert.ok((await topUpReview.locator('main').textContent()).includes(feeKey.toBase58()));
+    await topUpReview.getByRole('button', { name: 'Approve & send' }).click();
+    await topUpReview.getByText('Sent.').waitFor({ timeout: 180000 });
+    const after = BigInt(await connection.getBalance(feeKey, 'confirmed'));
+    assert.ok(after >= 70000000n - 100000n && after > before, `fee key ${before} -> ${after}`);
+    await topUpReview.close();
+    step('a fee key below its float is refilled from the wallet through a reviewed sealed send');
+  }
+
   // 8. Lock, wrong passphrase, unlock.
   await popup.getByRole('button', { name: 'Settings', exact: true }).click();
   await popup.getByRole('button', { name: 'Lock now' }).click();

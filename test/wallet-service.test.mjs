@@ -385,3 +385,21 @@ test('a custom mainnet RPC must agree with the public endpoint on slot and walle
     /different wallet state/,
   );
 });
+
+test('the fee key is offered a top-up from the wallet only when that send can run', async () => {
+  const { topUpAmount, FEE_FLOAT_LAMPORTS, FEE_REFUND_LAMPORTS, TOP_UP_MINIMUM_LAMPORTS } = await import(
+    '../src/wallet-service.js'
+  );
+  const base = { initialized: true, requiredLamports: 60000000n, availableLamports: 1000000000n };
+  // Below the float but able to fund a send: refill exactly the shortfall.
+  assert.equal(topUpAmount({ ...base, feeLamports: 62000000n }), FEE_FLOAT_LAMPORTS - 62000000n);
+  // Too little to fund the top-up send itself: it needs SOL from outside the wallet.
+  assert.equal(topUpAmount({ ...base, feeLamports: 59000000n }), 0n);
+  // Already at (or nearly at) the float: nothing to do.
+  assert.equal(topUpAmount({ ...base, feeLamports: FEE_FLOAT_LAMPORTS - TOP_UP_MINIMUM_LAMPORTS + 1n }), 0n);
+  // The wallet must cover the top-up plus that send's own fee refill.
+  const shortfall = FEE_FLOAT_LAMPORTS - 62000000n;
+  assert.equal(topUpAmount({ ...base, feeLamports: 62000000n, availableLamports: shortfall + FEE_REFUND_LAMPORTS - 1n }), 0n);
+  assert.equal(topUpAmount({ ...base, feeLamports: 62000000n, availableLamports: shortfall + FEE_REFUND_LAMPORTS }), shortfall);
+  assert.equal(topUpAmount({ ...base, initialized: false, feeLamports: 62000000n }), 0n);
+});
