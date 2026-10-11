@@ -17,11 +17,19 @@ jobs:
         with:
           path: quantum-seal-extension
           persist-credentials: false
-      # The extension builds against the core SDK next to it (file:../quantum-seal-wallet).
+      # The extension builds against the core SDK next to it (file:../quantum-seal-wallet),
+      # checked out at the reviewed commit pinned in CORE_REF, never the default branch.
+      - name: Read the pinned core commit
+        id: core
+        run: |
+          ref="$(tr -d '[:space:]' < quantum-seal-extension/CORE_REF)"
+          [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || { echo "CORE_REF must be a full commit hash"; exit 1; }
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
       # CORE_DEPLOY_KEY is a read-only deploy key on the private core repository.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           repository: qcommit/quantum-seal-wallet
+          ref: ${{ steps.core.outputs.ref }}
           ssh-key: ${{ secrets.CORE_DEPLOY_KEY }}
           path: quantum-seal-wallet
           persist-credentials: false
@@ -30,14 +38,17 @@ jobs:
           node-version-file: quantum-seal-wallet/.nvmrc
       - run: npm ci --ignore-scripts --no-fund
         working-directory: quantum-seal-wallet
-      - run: npm ci --no-fund
+      # No install scripts: esbuild runs from its platform package (an optional dependency).
+      - run: npm ci --ignore-scripts --no-fund
         working-directory: quantum-seal-extension
       - run: npm test
         working-directory: quantum-seal-extension
-      - run: npm run build
+      # --release refuses a core checkout that is not exactly CORE_REF.
+      - run: npm run build -- --release
         working-directory: quantum-seal-extension
       - name: Check the built extension
         working-directory: quantum-seal-extension
         run: |
           node -e "const m=require('./dist/manifest.json'); if(m.manifest_version!==3) process.exit(1); console.log(m.name, m.version)"
+          node -e "const b=require('./dist/build-info.json'); if(!b.core.matchesPin) process.exit(1); console.log('core', b.core.commit)"
           ls -la dist
