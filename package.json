@@ -7,7 +7,7 @@
   "description": "Quantum Seal browser extension: a post-quantum Solana wallet (send, receive, hold).",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --import ./test/support/register.mjs --test test/*.test.mjs",
     "e2e": "node e2e/run.mjs"
   },
   "dependencies": {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { area } from './fake-storage.mjs';
+import { area } from './support/fake-storage.mjs';
 
 // A minimal chrome.* for the service worker: storage areas with onChanged events, alarms,
 // and listener registries for the events the worker subscribes to.
