@@ -1,7 +1,7 @@
 {
   "status": "passed",
-  "finishedAt": "2026-10-11T12:10:20.470Z",
-  "program": "9BkDbHdYXR5Gji5SeAeFYMztfngbTeh5uYptnHouHRf5",
+  "finishedAt": "2026-10-11T12:30:06.175Z",
+  "program": "95CGk41RrzhtrkYXRTNYWH5JNbrmTADvkMqjqdGRTWgh",
   "steps": [
     "local validator runs the wallet program",
     "extension loads and is pinned to the local deployment",
@@ -21,6 +21,7 @@
     "lock clears access; a wrong passphrase is refused; the right one unlocks",
     "backup downloads encrypted keys plus the wallet descriptor; the Home reminder clears",
     "the passphrase changes only with the current one",
+    "with \"ask for my passphrase\" on, a send is approved only with the right passphrase",
     "settings save through the UI and the wallet auto-locks after the idle period",
     "forgot passphrase: remove the wallet, restore the backup, and the same wallet returns"
   ]

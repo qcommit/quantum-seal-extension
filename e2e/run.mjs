@@ -538,6 +538,32 @@ try {
   await popup.locator('nav').getByRole('button', { name: 'Home' }).click();
   step('the passphrase changes only with the current one');
 
+  // 9c. Settings > Security: ask for the passphrase before every approval.
+  await popup.getByRole('button', { name: 'Settings', exact: true }).click();
+  await popup.getByLabel(/Ask for my passphrase to approve each transfer/).check();
+  await popup.getByRole('button', { name: 'Save changes' }).click();
+  await popup.getByText('Saved.').waitFor({ timeout: 30000 });
+  await popup.locator('nav').getByRole('button', { name: 'Home' }).click();
+  const guardedTo = (await Keypair.generate()).publicKey;
+  await popup.getByRole('button', { name: 'Send', exact: true }).click();
+  await popup.getByPlaceholder('Recipient address').fill(guardedTo.toBase58());
+  await popup.getByPlaceholder('Amount').fill('0.02');
+  const guardedPromise = context.waitForEvent('page');
+  await popup.getByRole('button', { name: 'Review' }).click();
+  const guarded = await guardedPromise;
+  await guarded.waitForLoadState();
+  await guarded.getByRole('button', { name: 'Approve & send' }).click();
+  await guarded.getByText('Enter your passphrase to approve. Nothing was signed.').waitFor({ timeout: 60000 });
+  await guarded.getByLabel('Passphrase to approve').fill('not the passphrase');
+  await guarded.getByRole('button', { name: 'Approve & send' }).click();
+  await guarded.getByText('Wrong passphrase. Nothing was signed.').waitFor({ timeout: 60000 });
+  await guarded.getByLabel('Passphrase to approve').fill(NEW_PASS);
+  await guarded.getByRole('button', { name: 'Approve & send' }).click();
+  await guarded.getByText('Sent.').waitFor({ timeout: 180000 });
+  assert.equal(BigInt(await connection.getBalance(guardedTo, 'confirmed')), 20000000n);
+  await guarded.close();
+  step('with "ask for my passphrase" on, a send is approved only with the right passphrase');
+
   // 10. Settings UI and auto-lock: set one minute, stay idle, and the wallet locks itself.
   await popup.getByRole('button', { name: 'Settings', exact: true }).click();
   await popup.getByLabel('Auto-lock after (minutes)').fill('1');

@@ -653,3 +653,20 @@ test('with "ask for my passphrase" on, approve signs only with the right passphr
   const signed = await t.service.approve(record.id, record.digest, { passphrase: pass });
   assert.equal(signed.status, 'signed');
 });
+
+test('overview lists Token-2022 balances marked as not sendable, and skips empty ones', async () => {
+  const t = await setup();
+  const parsed = (mint, amount) => ({
+    pubkey: new PublicKey(mint),
+    account: { data: { parsed: { info: { mint, tokenAmount: { amount, decimals: 0, uiAmountString: amount } } } } },
+  });
+  const [classic, extended, empty] = [await key(), await key(), await key()];
+  t.chain.connection.getParsedTokenAccountsByOwner = async (_owner, { programId }) => ({
+    value: programId.toBase58().startsWith('Tokenz') ? [parsed(extended, '7'), parsed(empty, '0')] : [parsed(classic, '5')],
+  });
+  const o = await t.service.overview();
+  assert.deepEqual(o.tokens.map((x) => [x.mint, x.amount, Boolean(x.token2022)]), [
+    [classic, '5', false],
+    [extended, '7', true],
+  ]);
+});

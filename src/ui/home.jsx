@@ -256,13 +256,15 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
       {o.tokens.length ? (
         <ul className="token-list" aria-label="Tokens">
           {o.tokens.map((t) => (
-            <li className="token-row" key={t.account}>
+            <li className={`token-row${t.token2022 ? ' muted-row' : ''}`} key={t.account}>
               <span className="token-avatar" aria-hidden="true">
                 {(knownToken(o.cluster, t.mint)?.symbol ?? t.mint).slice(0, 2)}
               </span>
               <span className="token-name">
                 <strong title={t.mint}>{tokenLabel(o.cluster, t.mint, 5)}</strong>
-                <small>{knownToken(o.cluster, t.mint)?.name ?? 'SPL token'}</small>
+                <small>
+                  {t.token2022 ? 'Token-2022 · this version can’t send it' : (knownToken(o.cluster, t.mint)?.name ?? 'SPL token')}
+                </small>
               </span>
               <span className="token-value">
                 <strong title={t.uiAmount}>{t.uiAmount}</strong>

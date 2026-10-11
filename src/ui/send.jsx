@@ -34,7 +34,8 @@ export function SendPage({ onBack }) {
           balance: `${lamportsToSol(o.availableLamports)} SOL`,
           max: o.maxSendableLamports > 0n ? lamportsToSol(o.maxSendableLamports) : null,
         },
-        ...o.tokens.map((t) => ({
+        // Only classic SPL tokens can be sent in this version.
+        ...o.tokens.filter((t) => !t.token2022).map((t) => ({
           id: t.mint,
           name: tokenLabel(o.cluster, t.mint, 5),
           sub: knownToken(o.cluster, t.mint)?.name ?? 'SPL token',

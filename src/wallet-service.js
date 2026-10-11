@@ -607,17 +607,27 @@ export function createWalletService({
           { programId: TOKEN_PROGRAM },
           network.commitment,
         );
-        for (const { pubkey, account } of parsed.value) {
-          const t = account.data.parsed?.info;
-          if (!t) continue;
-          tokens.push({
-            account: pubkey.toBase58(),
-            mint: t.mint,
-            amount: t.tokenAmount.amount,
-            decimals: t.tokenAmount.decimals,
-            uiAmount: t.tokenAmount.uiAmountString,
-          });
-        }
+        // Token-2022 balances are listed too, so they are never invisible, but marked: this
+        // version only sends classic SPL tokens. A failed lookup never hides the rest.
+        const extended = await connection
+          .getParsedTokenAccountsByOwner(new PublicKey(d.wallet), { programId: new PublicKey(TOKEN_2022) }, network.commitment)
+          .catch(() => ({ value: [] }));
+        for (const [list, token2022] of [
+          [parsed.value, false],
+          [extended.value, true],
+        ])
+          for (const { pubkey, account } of list) {
+            const t = account.data.parsed?.info;
+            if (!t || (token2022 && t.tokenAmount.amount === '0')) continue;
+            tokens.push({
+              account: pubkey.toBase58(),
+              mint: t.mint,
+              amount: t.tokenAmount.amount,
+              decimals: t.tokenAmount.decimals,
+              uiAmount: t.tokenAmount.uiAmountString,
+              ...(token2022 ? { token2022: true } : {}),
+            });
+          }
       }
       // Wallets of earlier deployments on this network (e.g. before a re-pin) that still
       // hold SOL: they stay listed so their funds are not forgotten.

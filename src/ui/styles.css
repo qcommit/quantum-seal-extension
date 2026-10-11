@@ -484,3 +484,5 @@ dialog.sheet[open]::backdrop { animation: fade .2s ease-out; }
 .row-notice { display: flex; align-items: center; gap: 8px; }
 .row-notice .notice { flex: 1; }
 .check-hint { display: block; margin-top: 2px; font-size: 11px; color: var(--muted); }
+.token-row.muted-row .token-name strong, .token-row.muted-row .token-value strong { color: var(--ink-2); }
+.token-row.muted-row .token-name small { color: var(--amber); }

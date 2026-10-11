@@ -97,6 +97,7 @@ const SCENES = [
   ['home-sweep', 'popup', 'home-sweep', POPUP],
   ['home-other', 'popup', 'home-other', POPUP],
   ['home-long', 'popup', 'home-long', POPUP],
+  ['home-token2022', 'popup', 'home-token2022', POPUP, [scrollEnd]],
   ['home-error', 'popup', 'home-error', POPUP],
   ['home-loading', 'popup', 'home-loading', POPUP],
   ['receive', 'popup', 'home', POPUP, [click('Receive', { exact: true })]],

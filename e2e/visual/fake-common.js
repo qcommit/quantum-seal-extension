@@ -109,6 +109,14 @@ function overview() {
       return { ...base, feeLamports: 120056912n, sweepableLamports: 50056912n };
     case 'home-other':
       return { ...base, otherWallets: [{ wallet: TO, program: PROGRAM, lamports: 250000000n }] };
+    case 'home-token2022':
+      return {
+        ...base,
+        tokens: [
+          ...base.tokens,
+          { account: 'A3', mint: '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo', amount: '7000000', decimals: 6, uiAmount: '7', token2022: true },
+        ],
+      };
     case 'home-long':
       return { ...base, availableLamports: 123456789012345n };
     default:
