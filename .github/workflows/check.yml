@@ -60,3 +60,59 @@ jobs:
       - name: UI check (every screen state, accessibility scan)
         working-directory: quantum-seal-extension
         run: npm run visual
+
+  # The full end-to-end run: a local validator with the wallet program built from the pinned
+  # core commit (checked against its recorded canonical hash), driven through the built
+  # extension in Chromium.
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: 4
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          path: quantum-seal-extension
+          persist-credentials: false
+      - name: Read the pinned core commit
+        id: core
+        run: |
+          ref="$(tr -d '[:space:]' < quantum-seal-extension/CORE_REF)"
+          [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || { echo "CORE_REF must be a full commit hash"; exit 1; }
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: qcommit/quantum-seal-wallet
+          ref: ${{ steps.core.outputs.ref }}
+          ssh-key: ${{ secrets.CORE_DEPLOY_KEY }}
+          path: quantum-seal-wallet
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version-file: quantum-seal-wallet/.nvmrc
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal
+      - name: Install Agave 3.1.10 (validator, cargo-build-sbf)
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.10/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+      - name: Build the wallet program and check its canonical hash
+        working-directory: quantum-seal-wallet
+        run: |
+          bash scripts/build-sbf.sh
+          (cd target/deploy && sha256sum --check ../../PROGRAM_SHA256)
+      - name: Fetch the associated-token program (not in the validator's default genesis)
+        run: solana program dump -u mainnet-beta ATokenGPvbdGVxr1b2hvZ9zbHQBhL1v8Tq9GZy3s3pVm "$RUNNER_TEMP/ata.so"
+      - run: npm ci --ignore-scripts --no-fund
+        working-directory: quantum-seal-wallet
+      - run: npm ci --ignore-scripts --no-fund
+        working-directory: quantum-seal-extension
+      - name: Install Chromium
+        working-directory: quantum-seal-extension
+        run: npx --no-install playwright-core install --with-deps chromium
+      - name: End-to-end run
+        working-directory: quantum-seal-extension
+        env:
+          QS_SOLANA_BIN: /home/runner/.local/share/solana/install/active_release/bin
+          QS_ATA_PROGRAM: ${{ runner.temp }}/ata.so
+        run: npm run build && npm run e2e
