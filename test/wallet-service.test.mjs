@@ -352,3 +352,36 @@ test('token sends use the funded associated account first, else the largest bala
   assert.equal(pickTokenSource(accounts, 'none', 1n).address, 'B');
   assert.equal(pickTokenSource(accounts, 'ATA', null).address, 'B');
 });
+
+test('a custom mainnet RPC must agree with the public endpoint on slot and wallet state', async () => {
+  const { crossCheckRpc, RPC_SLOT_TOLERANCE } = await import('../src/wallet-service.js');
+  const { Keypair } = await import('@solana/web3.js');
+  const wallet = (await Keypair.generate()).publicKey.toBase58();
+  // A wallet account whose decoded state has the given nonce/epoch (layout from the SDK codec).
+  const walletData = (nonce, epoch) => {
+    const b = new Uint8Array(334);
+    b.set(new TextEncoder().encode('QSWAL001'), 0);
+    b[8] = 255; // bump
+    // policy: owners count 1, threshold 1, key[0] nonzero; guardian zero; delay 0
+    b[73] = 1; b[74] = 1; b.fill(7, 75, 107);
+    const view = new DataView(b.buffer);
+    view.setBigUint64(73 + 98 + 32 + 8, epoch, true);
+    view.setBigUint64(73 + 98 + 32 + 8 + 8, nonce, true);
+    return b;
+  };
+  const reference = (slot, nonce, epoch = 0n) => ({
+    getSlot: async () => slot,
+    getAccountInfo: async () => ({ data: walletData(nonce, epoch) }),
+  });
+  const intent = { nonce: 4n, epoch: 0n };
+  await crossCheckRpc({ reference: reference(1000n, 4n), wallet, intent, slot: 1100n });
+  await assert.rejects(
+    crossCheckRpc({ reference: reference(1000n, 4n), wallet, intent, slot: 1000n + RPC_SLOT_TOLERANCE + 1n }),
+    /different network time/,
+  );
+  await assert.rejects(crossCheckRpc({ reference: reference(1000n, 3n), wallet, intent, slot: 1000n }), /different wallet state/);
+  await assert.rejects(
+    crossCheckRpc({ reference: { getSlot: async () => 1000n, getAccountInfo: async () => null }, wallet, intent, slot: 1000n }),
+    /different wallet state/,
+  );
+});

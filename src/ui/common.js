@@ -16,6 +16,12 @@ export async function getSettings() {
 export async function saveSettings(next) {
   await storage.local.set({ [SETTINGS_KEY]: next });
 }
+// Once a wallet exists, its network choice is saved explicitly, so a later release that
+// changes the default network (e.g. mainnet once it is pinned) never switches it silently.
+export async function pinNetworkChoice() {
+  if ((await storage.local.get(SETTINGS_KEY))[SETTINGS_KEY] === undefined)
+    await saveSettings(await getSettings());
+}
 // Any interaction pushes the auto-lock deadline back.
 export function touch() {
   chrome.runtime.sendMessage({ type: 'activity' }).catch(() => {});

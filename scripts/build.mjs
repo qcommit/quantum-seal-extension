@@ -93,7 +93,7 @@ const result = await build({
   loader: { '.woff2': 'file' },
   assetNames: 'fonts/[name]-[hash]',
   legalComments: 'linked',
-  define: { 'process.env.NODE_ENV': '"production"', global: 'globalThis' },
+  define: { 'process.env.NODE_ENV': '"production"', global: 'globalThis', __QS_RELEASE__: release ? 'true' : 'false' },
   inject: [join(root, 'scripts/buffer-shim.js')],
   plugins: [dedupe],
   metafile: true,
@@ -122,6 +122,15 @@ for (const f of ['popup.html', 'review.html']) {
     throw new Error(`${f} contains an inline script or event handler.`);
 }
 const manifest = JSON.parse(readFileSync(join(dist, 'manifest.json'), 'utf8'));
+// Release builds talk only to HTTPS RPC endpoints: drop loopback access to a local validator.
+if (release) {
+  manifest.host_permissions = manifest.host_permissions.filter((h) => !h.startsWith('http://127.0.0.1'));
+  manifest.content_security_policy.extension_pages = manifest.content_security_policy.extension_pages.replace(
+    / http:\/\/127\.0\.0\.1:\*/g,
+    '',
+  );
+  writeFileSync(join(dist, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+}
 // The extension pages do not need WebAssembly or WebSockets; the CSP allows neither.
 for (const f of ['popup.js', 'review.js', 'background.js'])
   if (/\bWebAssembly\./.test(readFileSync(join(dist, f), 'utf8')))

@@ -8,6 +8,7 @@ import {
   service,
   getSettings,
   saveSettings,
+  pinNetworkChoice,
   onStorageChange,
   trackActivity,
   errorText,
@@ -27,6 +28,7 @@ function App() {
   const checkGate = useCallback(async () => {
     const n = ++seq.current;
     const exists = await vault.exists();
+    if (exists) await pinNetworkChoice();
     const unlocked = exists && (await vault.isUnlocked());
     if (n === seq.current) setGate(!exists ? 'welcome' : unlocked ? 'ready' : 'locked');
   }, []);

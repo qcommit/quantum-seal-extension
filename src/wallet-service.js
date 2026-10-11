@@ -23,7 +23,7 @@ import {
   parseUnits,
 } from 'quantum-seal-wallet/wallet';
 import { signApproval, parseApproval } from 'quantum-seal-wallet/approval';
-import { decodeIntent, intentDigest, deriveProof, hex, fromHex, PROOF_BYTES } from 'quantum-seal-wallet/codec';
+import { decodeIntent, decodeWallet, intentDigest, deriveProof, hex, fromHex, PROOF_BYTES } from 'quantum-seal-wallet/codec';
 import { closeProofInstruction, TOKEN_PROGRAM } from 'quantum-seal-wallet/instructions';
 import { submit } from 'quantum-seal-wallet/client';
 import { BUILT_IN, deploymentFor, networkConfig, isAvailable, mergeSettings } from './networks.js';
@@ -47,6 +47,28 @@ export const FEE_FLOAT_LAMPORTS = 70000000n;
 export const SWEEP_MINIMUM_LAMPORTS = 10000000n;
 // An approval must stay valid at least this many slots (about a minute) after signing.
 export const APPROVE_MARGIN_SLOTS = 150n;
+// How far a custom mainnet RPC's slot may drift from the default endpoint's before signing.
+export const RPC_SLOT_TOLERANCE = 300n;
+
+// A custom mainnet RPC could report a fake slot or wallet nonce to collect an approval that
+// becomes usable later (a future nonce, or an expiry far beyond the real slot). Before
+// signing on mainnet with a custom endpoint, both are confirmed against an independent one.
+export async function crossCheckRpc({ reference, wallet, intent, slot }) {
+  const [refSlot, account] = await Promise.all([
+    reference.getSlot('confirmed'),
+    reference.getAccountInfo(new PublicKey(wallet), 'confirmed'),
+  ]);
+  const drift = BigInt(refSlot) > slot ? BigInt(refSlot) - slot : slot - BigInt(refSlot);
+  if (drift > RPC_SLOT_TOLERANCE)
+    throw new Error(
+      'Your custom RPC reports a different network time than the public Solana endpoint. Nothing was signed. Check the RPC in Settings.',
+    );
+  const state = account ? decodeWallet(Uint8Array.from(account.data)) : null;
+  if (!state || state.nonce !== intent.nonce || state.epoch !== intent.epoch)
+    throw new Error(
+      'Your custom RPC reports different wallet state than the public Solana endpoint. Nothing was signed. Check the RPC in Settings.',
+    );
+}
 // Finished sends kept in the journal; unfinished ones are never dropped.
 export const MAX_FINISHED_SENDS = 200;
 export const SUPERSEDED_TEXT = 'Not sent: the wallet moved on, so this approval can no longer execute.';
@@ -585,6 +607,14 @@ export function createWalletService({
           throw new Error('This review is out of date: the wallet has sent something else since. Nothing was signed. Prepare the send again.');
         }
         const slot = BigInt(await network.connection.getSlot(network.commitment));
+        const ctx = await session();
+        if (network.cluster === 'mainnet-beta' && ctx.deployment.rpc !== BUILT_IN['mainnet-beta'].rpc) {
+          const refConfig = { ...networkConfig({ ...ctx.deployment, rpc: BUILT_IN['mainnet-beta'].rpc }) };
+          const reference = connect
+            ? connect(refConfig)
+            : new Connection(refConfig.rpc, { commitment: 'confirmed', disableRetryOnRateLimit: true, fetch: rateLimitedFetch(fetchImpl) });
+          await crossCheckRpc({ reference, wallet: d.wallet, intent, slot });
+        }
         if (intent.expiry <= slot + APPROVE_MARGIN_SLOTS) {
           await saveSend(finish(record, 'expired', { error: 'Not signed: this review expired before it was approved.' }));
           throw new Error('This review expired before you approved it. Nothing was signed. Prepare the send again.');

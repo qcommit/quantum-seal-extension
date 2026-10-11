@@ -3,7 +3,11 @@
 // re-verifies the deployed bytes against these values before every transaction.
 import { parseNetwork, GENESIS } from 'quantum-seal-wallet/network';
 
-export const BUILT_IN = Object.freeze({
+// Release builds (scripts/build.mjs --release) define __QS_RELEASE__ = true and ship
+// without the local-validator network or its loopback permissions.
+const RELEASE = typeof __QS_RELEASE__ !== 'undefined' && __QS_RELEASE__ === true;
+
+const NETWORKS = {
   'mainnet-beta': {
     label: 'Mainnet',
     rpc: 'https://api.mainnet-beta.solana.com',
@@ -30,7 +34,9 @@ export const BUILT_IN = Object.freeze({
     programSize: null,
     upgradeAuthority: null,
   },
-});
+};
+if (RELEASE) delete NETWORKS.localnet;
+export const BUILT_IN = Object.freeze(NETWORKS);
 
 // New installs open on mainnet once the release pins it, and on devnet until then.
 export function defaultCluster(builtIn = BUILT_IN) {
