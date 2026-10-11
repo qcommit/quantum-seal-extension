@@ -16,7 +16,7 @@ export const BUILT_IN = Object.freeze({
   devnet: {
     label: 'Devnet',
     rpc: 'https://api.devnet.solana.com',
-    // Test deployment of quantum-seal-wallet v0.1.0 (upgradeable on devnet only).
+    // Verified on-chain by scripts/pin-deployment.mjs on 2026-10-11.
     program: '6LBRd57jagVvhmpX1idsw9QXhoNHMHWstvpeGdSZAexT',
     programSha256: '4fbf18f66470322941b907adf03ebcd995385d35ac8c7ae4e3aa5ef63dd7a049',
     programSize: 141744,

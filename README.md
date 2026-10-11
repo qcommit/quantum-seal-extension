@@ -48,8 +48,10 @@ send against the public devnet deployment, with a funded devnet key supplied via
 ## Status
 
 - Devnet: built in (`6LBRd57jagVvhmpX1idsw9QXhoNHMHWstvpeGdSZAexT`).
-- Mainnet: available once the reviewed, immutable program is deployed and its address,
-  hash and size are pinned in `src/networks.js`.
+- Mainnet: available once the reviewed, immutable program is deployed. Pin it with
+  `node scripts/pin-deployment.mjs --cluster mainnet-beta --program <ADDRESS> --binary
+  ../quantum-seal-wallet/target/deploy/seal_wallet.so`, which verifies the deployment
+  on-chain (exact bytes, immutable) before writing `src/networks.js`.
 - Not yet listed on the Chrome Web Store. See [docs/STORE-LISTING.md](docs/STORE-LISTING.md)
   and [PRIVACY.md](PRIVACY.md).
 - Not independently audited.
