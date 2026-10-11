@@ -58,7 +58,7 @@ an SPL token send, a fee key below its float refilled from the wallet, lock and 
 wrong passphrase, backup download, an injected RPC failure that leaves a send
 "uncertain" until it is checked and resumed, two sends at the same nonce where the
 superseded one is reported "Not sent" and its proof deposit reclaimed, and auto-lock set
-through Settings, passphrase change, forgot-passphrase recovery from the backup, a token send that opens the recipient's token account, and a send approved only with the passphrase when Settings asks for it (21 steps). `e2e/release-smoke.mjs` checks the release build. `npm run visual` renders every UI state from fixtures and fails on any axe-core accessibility violation (also run in CI). `e2e/devnet-smoke.mjs` runs create, setup and a
+through Settings, passphrase change, forgot-passphrase recovery from the backup, a token send that opens the recipient's token account, and a send approved only with the passphrase when Settings asks for it (21 steps). CI runs it on every push, against the wallet program built from the pinned core commit and checked against its canonical hash. `e2e/release-smoke.mjs` checks the release build. `npm run visual` renders every UI state from fixtures and fails on any axe-core accessibility violation (also run in CI). `e2e/devnet-smoke.mjs` runs create, setup and a
 send against the public devnet deployment, with a funded devnet key supplied via
 `QS_DEVNET_FUNDER` (kept outside the repository). `QS_E2E_SHOTS=1 npm run e2e` also
 saves a screenshot of each screen it reaches to `.runtime/shots/`.
