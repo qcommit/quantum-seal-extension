@@ -19,12 +19,15 @@ public key into your private key. Quantum Seal approves every transfer with SLH-
 any funds move.
 
 - Send and receive SOL and classic SPL tokens, with a history of transfers in and out
-- Review the exact transfer in the extension's own window before signing
-- Your wallet address on each network is derived from your key, so a backup always recovers it
-- Keys stay on your device, encrypted with your passphrase
+- Review the exact transfer, including the total leaving your wallet, in the extension's own window before signing
+- Interrupted sends resume from on-chain state; unclear outcomes are checked, never re-sent blindly
+- Wrong-address protection: sends to your own wallet, programs, token mints or token accounts are stopped
+- Sending tokens to someone new? Quantum Seal can open their token account for you
+- Keys stay on your device, encrypted with your passphrase; auto-lock, and an optional passphrase check before every approval
+- One encrypted backup file restores your wallet and its address in any browser
 - No account, no analytics, no tracking
 
-Version 1 does not connect to dApps.
+This version does not connect to dApps, and lists Token-2022 balances without sending them.
 
 ## Single purpose
 

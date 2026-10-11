@@ -1013,9 +1013,16 @@ export function createWalletService({
         .filter((a) => (a.account.data.parsed?.info?.tokenAmount?.amount ?? '0') !== '0')
         .map((a) => a.pubkey.toBase58());
       const signatures = new Map();
-      for (const address of [d.wallet, ...tokenAccounts]) {
-        const list = await connection.getSignaturesForAddress(new PublicKey(address), { limit: RECEIPT_LOOKBACK }, commitment);
-        for (const sig of list) if (!sig.err && !signatures.has(sig.signature)) signatures.set(sig.signature, sig);
+      const addresses = [d.wallet, ...tokenAccounts];
+      // Three history lookups at a time: fast, without bursting public rate limits.
+      for (let i = 0; i < addresses.length; i += 3) {
+        const lists = await Promise.all(
+          addresses
+            .slice(i, i + 3)
+            .map((address) => connection.getSignaturesForAddress(new PublicKey(address), { limit: RECEIPT_LOOKBACK }, commitment)),
+        );
+        for (const list of lists)
+          for (const sig of list) if (!sig.err && !signatures.has(sig.signature)) signatures.set(sig.signature, sig);
       }
       // This extension's own transactions (uploads, executes, reclaims) deliver nothing in.
       const own = new Set(
