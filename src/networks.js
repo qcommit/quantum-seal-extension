@@ -57,6 +57,9 @@ export function mergeSettings(saved) {
   return {
     ...DEFAULT_SETTINGS,
     ...(saved ?? {}),
+    // A network this build does not have (a release build reading a development build's
+    // local-validator choice) falls back to the default.
+    cluster: BUILT_IN[saved?.cluster] ? saved.cluster : DEFAULT_SETTINGS.cluster,
     rpc: { ...(saved?.rpc ?? {}) },
     deployments: { ...(saved?.deployments ?? {}) },
   };

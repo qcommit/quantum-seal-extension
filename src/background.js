@@ -21,7 +21,9 @@ async function isUnlocked() {
   return Boolean((await chrome.storage.session.get(SESSION_KEY))[SESSION_KEY]);
 }
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender) => {
+  // Only this extension's own pages may report activity.
+  if (sender?.id !== chrome.runtime.id) return;
   // Activity only extends an existing unlock; it never re-arms a locked wallet.
   if (message?.type === 'activity')
     isUnlocked().then((unlocked) => (unlocked ? schedule() : undefined));

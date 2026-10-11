@@ -46,8 +46,9 @@ const RULES = [
   ],
   [
     /^Simulation rejected ([^:]+): (.*)$/s,
+    // The details come from the RPC endpoint: shown short, as details, never as advice.
     (m) =>
-      `The network rejected a transaction (${m[1]}) in simulation, so it was not sent. Details: ${m[2]}`,
+      `The network rejected a transaction (${m[1]}) in simulation, so it was not sent. Details: ${m[2].length > 160 ? `${m[2].slice(0, 160)}…` : m[2]}`,
   ],
   [
     /^Failed to fetch$|^NetworkError|^fetch failed|ECONNREFUSED|aborted due to timeout/,

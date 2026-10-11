@@ -64,7 +64,7 @@ export const vault = {
   create: never,
   importBackup: fail('The backup could not be opened with this passphrase.'),
   async publicInfo() {
-    return { feePayer: FEE, backedUp: !(scene === 'home-nobackup' || scene.startsWith('setup')) };
+    return { feePayer: FEE, backedUp: !(scene.includes('nobackup') || scene.startsWith('setup')) };
   },
   async markBackedUp() {},
   changePassphrase: fail('Unable to unlock keystore.'),
@@ -204,6 +204,8 @@ async function buildSends() {
     make(7, 'superseded', { records: chunks(2), reclaimSignature: 'r', reclaimedLamports: '56911920' }),
     make(8, 'expired', { reclaimError: 'Could not reach the Solana RPC endpoint.' }),
     make(9, 'discarded'),
+    // Discarded after its chunks went out: watched until it can no longer run.
+    make(11, 'discarded', { id: 'discarded-live', records: chunks(2) }),
     // Its fee refill goes to someone else: the window must refuse to approve it.
     make(10, 'review', { id: 'blocked' }, intent(10, { kind: 'transfer', to: TO, lamports: 250000000n }, TO)),
   ];

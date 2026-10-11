@@ -54,6 +54,8 @@ export const SWEEP_MINIMUM_LAMPORTS = 10000000n;
 export const APPROVE_MARGIN_SLOTS = 150n;
 // How far a custom mainnet RPC's slot may drift from the default endpoint's before signing.
 export const RPC_SLOT_TOLERANCE = 300n;
+// Approvals are prepared to expire this many slots (about 20 minutes) ahead (the SDK default).
+export const EXPIRY_HORIZON_SLOTS = 3000n;
 
 // A custom mainnet RPC could report a fake slot or wallet nonce to collect an approval that
 // becomes usable later (a future nonce, or an expiry far beyond the real slot). Before
@@ -73,6 +75,7 @@ export async function crossCheckRpc({ reference, wallet, intent, slot }) {
     throw new Error(
       'Your custom RPC reports different wallet state than the public Solana endpoint. Nothing was signed. Check the RPC in Settings.',
     );
+  return BigInt(refSlot);
 }
 // Finished sends kept in the journal; unfinished ones are never dropped.
 export const MAX_FINISHED_SENDS = 200;
@@ -125,6 +128,16 @@ export function executeSignature(record) {
 function mayHaveProof(record) {
   return (record.records ?? []).some((r) => r.label.includes('begin-proof'));
 }
+// A discarded send whose signed approval already went out in an upload transaction: anyone
+// holding those chunks could still execute it until it expires or the wallet's nonce moves,
+// so it is watched (and shown as possibly executing) until one of those happens.
+export function mayStillExecute(record) {
+  return (
+    record.status === 'discarded' &&
+    record.watchSettled !== true &&
+    (record.records ?? []).some((r) => r.phase === 'prepared')
+  );
+}
 // Sends that will never execute through their own proof, but whose proof deposit may
 // still sit in a proof account.
 export function needsReclaim(record) {
@@ -169,12 +182,23 @@ export function receiptsOf(tx, wallet, ownedTokenAccounts = []) {
     ...(meta.loadedAddresses?.writable ?? []),
     ...(meta.loadedAddresses?.readonly ?? []),
   ].map((k) => (typeof k === 'string' ? k : (k.pubkey ?? k).toBase58()));
-  const from = keys[0] ?? null;
+  // The sender is whoever lost the most of what arrived (not just the fee payer, which
+  // anyone can be); a mint or other source with no loser falls back to the fee payer.
+  const payer = keys[0] ?? null;
   const out = [];
   const i = keys.indexOf(wallet);
   if (i >= 0 && meta.preBalances?.[i] !== undefined && meta.postBalances?.[i] !== undefined) {
     const delta = BigInt(meta.postBalances[i]) - BigInt(meta.preBalances[i]);
-    if (delta > 0n) out.push({ asset: 'SOL', amount: lamportsToSol(delta), from });
+    if (delta > 0n) {
+      let from = payer,
+        most = 0n;
+      keys.forEach((k, j) => {
+        if (j === i || meta.preBalances[j] === undefined || meta.postBalances[j] === undefined) return;
+        const lost = BigInt(meta.preBalances[j]) - BigInt(meta.postBalances[j]);
+        if (lost > most) [from, most] = [k, lost];
+      });
+      out.push({ asset: 'SOL', amount: lamportsToSol(delta), from });
+    }
   }
   const owned = new Set(ownedTokenAccounts);
   const mine = (b) => b.owner === wallet || owned.has(keys[b.accountIndex]);
@@ -182,7 +206,16 @@ export function receiptsOf(tx, wallet, ownedTokenAccounts = []) {
     if (!mine(post)) continue;
     const pre = (meta.preTokenBalances ?? []).find((b) => b.accountIndex === post.accountIndex);
     const delta = BigInt(post.uiTokenAmount.amount) - BigInt(pre?.uiTokenAmount.amount ?? '0');
-    if (delta > 0n) out.push({ asset: post.mint, amount: formatUnits(delta, post.uiTokenAmount.decimals), from });
+    if (delta <= 0n) continue;
+    let from = payer,
+      most = 0n;
+    for (const before of meta.preTokenBalances ?? []) {
+      if (before.mint !== post.mint || mine(before)) continue;
+      const after = (meta.postTokenBalances ?? []).find((b) => b.accountIndex === before.accountIndex);
+      const lost = BigInt(before.uiTokenAmount.amount) - BigInt(after?.uiTokenAmount.amount ?? '0');
+      if (lost > most) [from, most] = [before.owner ?? keys[before.accountIndex] ?? payer, lost];
+    }
+    out.push({ asset: post.mint, amount: formatUnits(delta, post.uiTokenAmount.decimals), from });
   }
   return out;
 }
@@ -191,13 +224,26 @@ const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 const MINT_BYTES = 82;
 const TOKEN_ACCOUNT_BYTES = 165;
 // Catches the usual wrong-address mistakes before anything is signed: this wallet's own
-// address, a program, or a token mint or token account pasted where a wallet belongs.
-// Accounts the recipient has not used yet (no account on-chain) are fine.
-async function checkRecipient(connection, network, recipient, wallet) {
-  if (recipient.toBase58() === wallet)
+// address (or an older one of yours), a program, an unused address nobody can sign for,
+// or a token mint or token account pasted where a wallet belongs.
+async function checkRecipient(connection, network, recipient, wallet, ownWallets = []) {
+  const address = recipient.toBase58();
+  if (address === wallet)
     throw new Error('That is this wallet’s own address. Enter the address you want to send to.');
+  if (ownWallets.includes(address))
+    throw new Error(
+      'That is an older wallet of yours from an earlier version of the Quantum Seal program, which this version cannot move funds out of. Enter another address.',
+    );
   const info = await connection.getAccountInfo(recipient, network.commitment);
-  if (!info) return;
+  if (!info) {
+    // Unused addresses are fine when a key controls them; an unused off-curve address
+    // (a program-derived one) has nobody who could ever sign to move what lands there.
+    if (!PublicKey.isOnCurve(recipient.toBytes()))
+      throw new Error(
+        'Nobody holds a key for that address and it has no account yet, so funds sent there could be lost. Check the recipient address.',
+      );
+    return;
+  }
   if (info.executable) throw new Error('That address is a program, not a wallet. Check the recipient address.');
   const owner = info.owner?.toBase58?.() ?? String(info.owner);
   if (owner !== TOKEN_PROGRAM.toBase58() && owner !== TOKEN_2022) return;
@@ -405,6 +451,20 @@ export function createWalletService({
 
   // Closes this send's proof account (created by the fee key) and returns its rent to
   // the fee key. Safe at any stage: the program lets the uploader close its own proof.
+  // For a watched discarded send: did someone execute it after all, or can it no longer run?
+  async function settleDiscarded(record, network, d) {
+    const intent = decodeIntent(fromHex(record.intentHex));
+    const status = await walletStatus(network, d);
+    if (status.initialized && (status.state.nonce !== intent.nonce || status.state.epoch !== intent.epoch)) {
+      const found = await findExecution(network, record);
+      if (found) return finish(record, 'done', { executeSignature: found, executedElsewhere: true });
+      record.watchSettled = true;
+      return record;
+    }
+    const slot = BigInt(await network.connection.getSlot(network.commitment));
+    if (intent.expiry < slot) record.watchSettled = true;
+    return record;
+  }
   async function reclaim(record, network) {
     if (!mayHaveProof(record)) {
       record.reclaimed = true;
@@ -475,7 +535,7 @@ export function createWalletService({
     async availability() {
       const s = await settings();
       return Object.fromEntries(
-        ['mainnet-beta', 'devnet', 'localnet'].map((c) => [c, isAvailable(deploymentFor(s, c))]),
+        Object.keys(BUILT_IN).map((c) => [c, isAvailable(deploymentFor(s, c))]),
       );
     },
 
@@ -603,7 +663,8 @@ export function createWalletService({
       const recipient = parseAddress(to);
       const status = await ownStatus(network, d);
       if (!status.initialized) throw new Error('Create the wallet first.');
-      await checkRecipient(connection, network, recipient, d.wallet);
+      const ownWallets = (info.descriptors[network.cluster] ?? []).map((x) => x.wallet);
+      await checkRecipient(connection, network, recipient, d.wallet, ownWallets);
       // A send needs one proof deposit plus fees on the fee key; say so before signing.
       const cost = await executionCost(network, 1);
       const feeLamports = BigInt(await connection.getBalance(new PublicKey(info.feePayer), network.commitment));
@@ -688,7 +749,9 @@ export function createWalletService({
           throw new Error(
             'The transfer changed after this review window opened. Nothing was signed. Close it and review the send again.',
           );
-        const { network, d } = await sendContext(record);
+        // One settings snapshot for the whole decision: the connection that supplies the
+        // slot and nonce is the one whose endpoint decides whether to cross-check.
+        const { network, deployment, d } = await sendContext(record);
         const info = await ownerInfo();
         const intent = decodeIntent(bytes);
         const view = describeIntent(intent, { cluster: record.cluster });
@@ -706,13 +769,21 @@ export function createWalletService({
           throw new Error('This review is out of date: the wallet has sent something else since. Nothing was signed. Prepare the send again.');
         }
         const slot = BigInt(await network.connection.getSlot(network.commitment));
-        const ctx = await session();
-        if (network.cluster === 'mainnet-beta' && ctx.deployment.rpc !== BUILT_IN['mainnet-beta'].rpc) {
-          const refConfig = { ...networkConfig({ ...ctx.deployment, rpc: BUILT_IN['mainnet-beta'].rpc }) };
+        const slots = [slot];
+        if (network.cluster === 'mainnet-beta' && deployment.rpc !== BUILT_IN['mainnet-beta'].rpc) {
+          const refConfig = { ...networkConfig({ ...deployment, rpc: BUILT_IN['mainnet-beta'].rpc }) };
           const reference = connect
             ? connect(refConfig)
             : new Connection(refConfig.rpc, { commitment: 'confirmed', disableRetryOnRateLimit: true, fetch: rateLimitedFetch(fetchImpl) });
-          await crossCheckRpc({ reference, wallet: d.wallet, intent, slot });
+          slots.push(await crossCheckRpc({ reference, wallet: d.wallet, intent, slot }));
+        }
+        // An expiry set from a slot reported too far ahead would make this approval usable
+        // later than the user expects: refuse anything beyond the normal horizon.
+        if (slots.some((s) => intent.expiry > s + EXPIRY_HORIZON_SLOTS + RPC_SLOT_TOLERANCE)) {
+          await saveSend(finish(record, 'expired', { error: 'Not signed: its expiry was set too far ahead.' }));
+          throw new Error(
+            'This review’s expiry is further ahead than expected, so the RPC may have reported a wrong time. Nothing was signed. Check the RPC in Settings and prepare the send again.',
+          );
         }
         if (intent.expiry <= slot + APPROVE_MARGIN_SLOTS) {
           await saveSend(finish(record, 'expired', { error: 'Not signed: this review expired before it was approved.' }));
@@ -807,7 +878,8 @@ export function createWalletService({
             }, { ifAvailable: true }).catch(() => {});
           continue;
         }
-        if (!UNFINISHED_SIGNED.includes(candidate.status) && !needsReclaim(candidate)) continue;
+        if (!UNFINISHED_SIGNED.includes(candidate.status) && !needsReclaim(candidate) && !mayStillExecute(candidate))
+          continue;
         try {
           await withLock(
             `send:${candidate.id}`,
@@ -815,11 +887,13 @@ export function createWalletService({
               const record = await getSend(candidate.id);
               if (!record) return;
               if (UNFINISHED_SIGNED.includes(record.status) && record.approval) await settle(record, network, d);
+              if (mayStillExecute(record)) await settleDiscarded(record, network, d);
               if (needsReclaim(record)) {
                 await tryReclaim(record, network);
                 if (record.reclaimSignature && record.reclaimed) reclaimed++;
-                if (record.status === 'discarded' && record.reclaimed) return removeSend(record.id);
               }
+              if (record.status === 'discarded' && !needsReclaim(record) && !mayStillExecute(record))
+                return removeSend(record.id);
               await saveSend(record);
             },
             { ifAvailable: true },
@@ -842,9 +916,13 @@ export function createWalletService({
       if (!status.initialized) return [];
       const { commitment } = network;
       const wallet = new PublicKey(d.wallet);
+      // Only accounts holding a balance: anyone can open empty token accounts for this
+      // wallet, and each would cost history lookups.
       const tokenAccounts = (
         await connection.getParsedTokenAccountsByOwner(wallet, { programId: TOKEN_PROGRAM }, commitment)
-      ).value.map((a) => a.pubkey.toBase58());
+      ).value
+        .filter((a) => (a.account.data.parsed?.info?.tokenAmount?.amount ?? '0') !== '0')
+        .map((a) => a.pubkey.toBase58());
       const signatures = new Map();
       for (const address of [d.wallet, ...tokenAccounts]) {
         const list = await connection.getSignaturesForAddress(new PublicKey(address), { limit: RECEIPT_LOOKBACK }, commitment);
@@ -855,7 +933,8 @@ export function createWalletService({
         (await allSends()).flatMap((r) => [...(r.records ?? []).map((x) => x.signature), r.executeSignature, r.reclaimSignature]),
       );
       for (const sig of own) signatures.delete(sig);
-      const key = `${RECEIPTS_PREFIX}${deployment.cluster}:${d.wallet}`;
+      // Per endpoint, so what one RPC reported is never shown after switching to another.
+      const key = `${RECEIPTS_PREFIX}${deployment.cluster}:${deployment.rpc}:${d.wallet}`;
       const cache = (await storage.local.get(key))[key] ?? {};
       const missing = [...signatures.keys()].filter((sig) => !(sig in cache));
       // Two at a time: public RPC endpoints rate-limit bursts.
@@ -900,12 +979,23 @@ export function createWalletService({
         throw new Error(
           `${count} send${count === 1 ? ' is' : 's are'} not finished. Open Activity to finish or discard ${count === 1 ? 'it' : 'them'} first.`,
         );
-      await vault.remove();
-      const all = await storage.local.get(null);
-      const keys = Object.keys(all).filter(
-        (k) => isSendKey(k) || k.startsWith(RECEIPTS_PREFIX) || k === LEGACY_SENDS_KEY,
-      );
-      if (keys.length) await storage.local.remove(keys);
+      // Hold every send's lock, so no review window is mid-send while its journal goes.
+      const ids = (await allSends()).map((r) => r.id);
+      const holdingAll = (rest, fn) =>
+        rest.length
+          ? withLock(`send:${rest[0]}`, () => holdingAll(rest.slice(1), fn), {
+              ifAvailable: true,
+              busyMessage: 'A send is running in another window. Let it finish or close that window, then try again.',
+            })
+          : fn();
+      await holdingAll(ids, async () => {
+        await vault.remove();
+        const all = await storage.local.get(null);
+        const keys = Object.keys(all).filter(
+          (k) => isSendKey(k) || k.startsWith(RECEIPTS_PREFIX) || k === LEGACY_SENDS_KEY,
+        );
+        if (keys.length) await storage.local.remove(keys);
+      });
       cached = null;
     },
     async listSends() {
@@ -936,11 +1026,12 @@ export function createWalletService({
           } catch (error) {
             record.reclaimError = errorText(error);
           }
-          if (!needsReclaim(record)) {
+          if (!needsReclaim(record) && !mayStillExecute(record)) {
             await removeSend(id);
             return null;
           }
-          // Kept until its deposit is reclaimed (retried when the popup opens).
+          // Kept until its deposit is reclaimed and, if its approval was published, until it
+          // can no longer execute (both checked again when the popup opens).
           return saveSend(record);
         },
         { ifAvailable: true, busyMessage: 'This send is running in another window.' },

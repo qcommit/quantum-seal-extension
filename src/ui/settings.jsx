@@ -314,7 +314,10 @@ export function PassphrasePage({ onBack }) {
 // Removing the wallet, from Settings or from the lock screen ("Forgot passphrase?").
 export function RemoveWallet({ onRemoved, intro }) {
   const [ack, setAck] = useState(false);
-  const open = useLoad(() => service.unfinishedSends(), []);
+  const [typed, setTyped] = useState('');
+  const open = useLoad(async () => ({ ...(await service.unfinishedSends()), info: await vault.publicInfo() }), []);
+  // Never backed up: removing it loses the funds for good, so ask for the word itself.
+  const unsaved = open.data?.info && !open.data.info.backedUp;
   const { busy, notice, run } = useAction();
   const remove = () =>
     run(async () => {
@@ -340,11 +343,27 @@ export function RemoveWallet({ onRemoved, intro }) {
           does not bring {pending === 1 ? 'it' : 'them'} back.
         </Notice>
       ) : null}
+      {unsaved ? (
+        <>
+          <Notice kind="error">
+            This browser has no record of a backup of this wallet. If you do not have one, removing it loses its funds
+            for good.
+          </Notice>
+          <Field label="Type REMOVE to confirm">
+            <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" spellCheck="false" />
+          </Field>
+        </>
+      ) : null}
       <label className="check-row">
         <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
         <span>I have my backup file and its passphrase.</span>
       </label>
-      <ActionButton className="danger full" busy={busy} disabled={!ack || open.loading} onClick={remove}>
+      <ActionButton
+        className="danger full"
+        busy={busy}
+        disabled={!ack || open.loading || (unsaved && typed.trim() !== 'REMOVE')}
+        onClick={remove}
+      >
         Remove wallet from this browser
       </ActionButton>
       <ActionNotice notice={notice} />

@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { decodeIntent, fromHex, hex, intentDigest } from 'quantum-seal-wallet/codec';
 import { BUILT_IN, explorerUrl } from '../networks.js';
 import { tokenLabel } from '../tokens.js';
-import { executeSignature } from '../wallet-service.js';
+import { executeSignature, mayStillExecute } from '../wallet-service.js';
 import {
   vault,
   service,
@@ -216,6 +216,8 @@ function Review() {
   const inReview = record.status === 'review';
   const execSignature = executeSignature(record);
   const notSent = ['superseded', 'expired', 'discarded'].includes(record.status);
+  // Discarded after its approval went out: not provably unsent yet.
+  const pending = mayStillExecute(record);
 
   let footer = null;
   if (inReview)
@@ -251,6 +253,13 @@ function Review() {
         </button>
       </>
     );
+  else if (notSent && pending && !running)
+    // Kept on purpose until it can no longer run, so there is nothing to remove yet.
+    footer = (
+      <button type="button" className="primary" onClick={() => window.close()}>
+        Close
+      </button>
+    );
   else if (notSent && !running)
     footer = (
       <>
@@ -280,7 +289,7 @@ function Review() {
       <main className="review-main review-scroll" tabIndex={0} aria-label="Transfer">
         <h1>{inReview ? 'Review transfer' : 'Transfer'}</h1>
         <section className="review-hero" aria-label="Amount">
-          <p className="eyebrow">{EYEBROW[notSent ? 'notSent' : record.status] ?? 'Sending'}</p>
+          <p className="eyebrow">{pending ? 'Discarded' : (EYEBROW[notSent ? 'notSent' : record.status] ?? 'Sending')}</p>
           <p className="review-amount">
             {amount} <small>{unit}</small>
           </p>
@@ -305,18 +314,20 @@ function Review() {
         ) : null}
 
         {notSent ? (
-          <div className={`result ${record.status === 'discarded' ? 'neutral' : 'warn'}`}>
+          <div className={`result ${record.status === 'discarded' && !pending ? 'neutral' : 'warn'}`}>
             <span className="result-icon">
-              {record.status === 'discarded' ? <Close size={18} /> : <Alert size={18} />}
+              {record.status === 'discarded' && !pending ? <Close size={18} /> : <Alert size={18} />}
             </span>
             <div>
-              <p className="result-title">Nothing was sent.</p>
+              <p className="result-title">{pending ? 'Discarded, but it could still run.' : 'Nothing was sent.'}</p>
               <p>
                 {record.status === 'superseded'
                   ? 'The wallet moved on (another transfer used this approval’s turn), so this approval can no longer execute. No funds left your wallet for it.'
                   : record.status === 'expired'
                     ? 'This approval expired before it could run. No funds left your wallet for it.'
-                    : 'You discarded this send.'}
+                    : pending
+                      ? `Its signed approval was already published while uploading, so anyone holding it could still execute this transfer until slot ${record.expiry}, unless your wallet sends something else first. Activity shows it as Sent if that happens.`
+                      : 'You discarded this send.'}
               </p>
               {record.reclaimSignature ? (
                 <p>Its proof deposit ({lamportsToSol(record.reclaimedLamports)} SOL) went back to your fee address.</p>
@@ -435,7 +446,7 @@ function Review() {
       </main>
       {footer ? (
         <footer
-          className={`review-footer${inReview || notSent || ['uncertain', 'failed', 'signed'].includes(record.status) ? ' two' : ''}`}
+          className={`review-footer${inReview || (notSent && !pending) || ['uncertain', 'failed', 'signed'].includes(record.status) ? ' two' : ''}`}
         >
           {footer}
         </footer>

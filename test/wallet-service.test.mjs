@@ -17,6 +17,7 @@ import {
   MAX_FINISHED_SENDS,
   receiptsOf,
   formatUnits,
+  mayStillExecute,
 } from '../src/wallet-service.js';
 import { fakeStorage } from './support/fake-storage.mjs';
 import { fakeChain } from './support/fake-chain.mjs';
@@ -63,6 +64,16 @@ test('a send to this wallet, a program, a mint or a token account is refused bef
   const ext = new Uint8Array(200);
   ext[165] = 1;
   await refused(await put({ owner: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'), data: ext }), /token mint/);
+  // An unused program-derived address: nobody could move funds sent there.
+  const [pda] = await PublicKey.findProgramAddress([new TextEncoder().encode('nobody')], new PublicKey(t.chain.program));
+  await refused(pda.toBase58(), /Nobody holds a key/);
+  // An older wallet of yours from another deployment.
+  const older = await t.chain.deployAgain();
+  const vaultInfo = await t.vault.publicInfo();
+  const { ownDescriptor } = await import('../src/descriptors.js');
+  const old = await ownDescriptor(vaultInfo.ownerPublicKey, older.program, older.genesis);
+  await t.vault.addDescriptor('localnet', old);
+  await refused(old.wallet, /older wallet of yours/);
   // Plain system accounts, other program-owned accounts and unused addresses are fine.
   assert.ok(await t.service.prepareSend({ to: await put({ owner: new PublicKey('11111111111111111111111111111111') }), amount: '0.01' }));
   assert.ok(await t.service.prepareSend({ to: await key(), amount: '0.01' }));
@@ -273,13 +284,26 @@ test('execute and checkUncertain refuse a send from another network or wallet', 
   assert.equal((await stored(t.storage, record.id)).status, 'submitting');
 });
 
-test('discarding a signed send that failed closes its proof and removes it', async () => {
+test('discarding a failed send closes its proof; once its approval was published it is watched until it expires', async () => {
   const t = await setup();
   const { record, proof } = await interruptedSend(t);
   await edit(t.storage, record.id, (r) => (r.status = 'failed'));
-  await t.service.discardSend(record.id);
-  assert.equal(await stored(t.storage, record.id), undefined);
+  const kept = await t.service.discardSend(record.id);
   assert.equal(await t.chain.connection.getAccountInfo(proof), null);
+  // Its chunks went out in an upload transaction, so it is not provably unsent yet.
+  assert.equal(kept.status, 'discarded');
+  assert.equal(mayStillExecute(kept), true);
+  await t.service.reclaimAbandoned();
+  assert.ok(await stored(t.storage, record.id), 'kept while it could still run');
+  t.chain.slot = BigInt(record.expiry) + 1n;
+  await t.service.reclaimAbandoned();
+  assert.equal(await stored(t.storage, record.id), undefined, 'removed once expired');
+  // A send discarded before anything was uploaded is removed at once.
+  const fresh = await t.service.prepareSend({ to: await key(), amount: '0.01' });
+  await t.service.approve(fresh.id, fresh.digest);
+  await edit(t.storage, fresh.id, (r) => (r.status = 'failed'));
+  assert.equal(await t.service.discardSend(fresh.id), null);
+  assert.equal(await stored(t.storage, fresh.id), undefined);
   // A send whose outcome is unknown cannot be discarded.
   const second = await interruptedSend(t);
   await edit(t.storage, second.record.id, (r) => (r.status = 'uncertain'));
@@ -448,6 +472,16 @@ test('receiptsOf reads SOL and token deliveries to this wallet only', async () =
     postTokenBalances: [balance('2250000', { owner: wallet })],
   });
   assert.deepEqual(receiptsOf(token, wallet), [{ asset: mint, amount: '1.25', from: sender }]);
+  // A third party paying the fee is not the sender: whoever lost the SOL or tokens is.
+  const relayer = await key();
+  const relayed = { transaction: { message: { staticAccountKeys: [relayer, wallet, sender].map((k) => new PublicKey(k)) } }, meta: { err: null, preBalances: [10n, 0n, 9000000000n], postBalances: [5n, 1000000000n, 8000000000n] } };
+  assert.deepEqual(receiptsOf(relayed, wallet), [{ asset: 'SOL', amount: '1', from: sender }]);
+  const senderTokens = { accountIndex: 0, mint, owner: sender, uiTokenAmount: { amount: '3000000', decimals: 6 } };
+  const relayedToken = tx({
+    preTokenBalances: [senderTokens, balance('0', { owner: wallet })],
+    postTokenBalances: [{ ...senderTokens, uiTokenAmount: { amount: '1000000', decimals: 6 } }, balance('2000000', { owner: wallet })],
+  });
+  assert.deepEqual(receiptsOf(relayedToken, wallet), [{ asset: mint, amount: '2', from: sender }]);
   // Older RPC responses omit the owner: an account the wallet holds still counts.
   const noOwner = tx({ preBalances: [], postBalances: [], postTokenBalances: [balance('5')] });
   assert.deepEqual(receiptsOf(noOwner, wallet, [ata]), [{ asset: mint, amount: '0.000005', from: sender }]);
@@ -501,4 +535,30 @@ test('removeWallet refuses while a send holds a deposit, then clears keys, journ
   assert.equal(await t.vault.exists(), false);
   assert.deepEqual(Object.keys(t.storage.local.dump()), ['settings']);
   assert.equal(await stored(t.storage, record.id), undefined);
+});
+
+test('a discarded send that someone else executes shows as sent', async () => {
+  const t = await setup();
+  const { record } = await interruptedSend(t);
+  await edit(t.storage, record.id, (r) => (r.status = 'failed'));
+  await t.service.discardSend(record.id);
+  const message = new Transaction({ feePayer: new PublicKey(await key()), recentBlockhash: await key() })
+    .add(executeInstruction(fromHex(record.intentHex), [new PublicKey(await key())]))
+    .compileMessage();
+  t.chain.addHistory(t.d.wallet, message, 'run-by-someone-else');
+  await t.chain.setWallet(t.d, { nonce: 1n });
+  await t.service.reclaimAbandoned();
+  const after = await stored(t.storage, record.id);
+  assert.equal(after.status, 'done');
+  assert.equal(after.executeSignature, 'run-by-someone-else');
+  assert.equal(after.executedElsewhere, true);
+});
+
+test('approve refuses an expiry set from a slot reported too far ahead', async () => {
+  const t = await setup();
+  t.chain.slot = 1000000n;
+  const record = await t.service.prepareSend({ to: await key(), amount: '0.01' });
+  t.chain.slot = 1000n;
+  await assert.rejects(t.service.approve(record.id, record.digest), /expiry is further ahead/);
+  assert.equal((await stored(t.storage, record.id)).approval ?? null, null);
 });
