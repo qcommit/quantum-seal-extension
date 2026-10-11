@@ -58,6 +58,8 @@ export function createVaultStore(storage) {
         ownerPublicKey: vault.owner.publicKey,
         feePayer: vault.feePayer,
         descriptors: descriptorLists(vault.descriptors),
+        // A backup was downloaded, or the wallet was restored from one.
+        backedUp: Boolean(vault.backedUpAt),
       };
     },
     async create(password) {
@@ -112,6 +114,7 @@ export function createVaultStore(storage) {
               feePayer,
               descriptors,
               createdAt: new Date().toISOString(),
+              backedUpAt: new Date().toISOString(),
             },
           });
           await storage.session.set({ [SESSION_KEY]: { owner: hex(owner), fee: hex(fee) } });
@@ -188,6 +191,15 @@ export function createVaultStore(storage) {
         descriptors: descriptorLists(vault.descriptors),
         exportedAt: new Date().toISOString(),
       };
+    },
+    // Called once the backup file has been handed to the browser to save. One backup
+    // covers every wallet address: they are re-derived from the owner key on restore.
+    async markBackedUp() {
+      return withLock('vault', async () => {
+        const vault = await read();
+        if (!vault) throw new Error('No wallet in this browser profile.');
+        if (!vault.backedUpAt) await storage.local.set({ [VAULT_KEY]: { ...vault, backedUpAt: new Date().toISOString() } });
+      });
     },
   };
 }

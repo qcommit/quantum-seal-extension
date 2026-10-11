@@ -168,7 +168,8 @@ export function BackupPage({ onBack }) {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      return 'Backup downloaded.';
+      await vault.markBackedUp();
+      return 'Backup downloaded. Keep the file and your passphrase somewhere safe.';
     });
   return (
     <>

@@ -64,8 +64,9 @@ export const vault = {
   create: never,
   importBackup: fail('The backup could not be opened with this passphrase.'),
   async publicInfo() {
-    return { feePayer: FEE };
+    return { feePayer: FEE, backedUp: !(scene === 'home-nobackup' || scene.startsWith('setup')) };
   },
+  async markBackedUp() {},
   exportBackup: never,
   async lock() {},
 };

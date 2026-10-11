@@ -1,7 +1,7 @@
 {
   "status": "passed",
-  "finishedAt": "2026-10-11T09:37:59.404Z",
-  "program": "9SLC6vXRnzbZ8n7wV2VK8CeaagH8XkC9TmWWFWdFpGtE",
+  "finishedAt": "2026-10-11T10:00:48.145Z",
+  "program": "BBqd324SfeMzHZNZ7K6u1kdwRWgab8PugpXeQK894Rz1",
   "steps": [
     "local validator runs the wallet program",
     "extension loads and is pinned to the local deployment",
@@ -18,7 +18,7 @@
     "a send superseded by another at the same nonce is reported \"Not sent\" and its proof deposit is reclaimed",
     "a fee key below its float is refilled from the wallet through a reviewed sealed send",
     "lock clears access; a wrong passphrase is refused; the right one unlocks",
-    "backup downloads encrypted keys plus the wallet descriptor",
+    "backup downloads encrypted keys plus the wallet descriptor; the Home reminder clears",
     "settings save through the UI and the wallet auto-locks after the idle period"
   ]
 }

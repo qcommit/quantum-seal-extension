@@ -73,6 +73,8 @@ function Wallet({ onLock }) {
   const [initialized, setInitialized] = useState(null);
   const [settingsVersion, setSettingsVersion] = useState(0);
   const scroller = useRef(null);
+  // The backup page returns to wherever it was opened from (Home's reminder or Settings).
+  const backupReturn = useRef('settings');
   // Setup finishing swaps the whole page; start the new one at the top.
   useEffect(() => {
     scroller.current?.scrollTo(0, 0);
@@ -158,14 +160,25 @@ function Wallet({ onLock }) {
             onReceive={() => setSheet('receive')}
             onSend={() => go('send')}
             onSettings={() => go('settings')}
+            onBackup={() => {
+              backupReturn.current = 'home';
+              go('backup');
+            }}
           />
         ) : null}
         {page === 'activity' ? <ActivityTab /> : null}
         {page === 'send' ? <SendPage onBack={() => go('home')} /> : null}
         {page === 'settings' ? (
-          <SettingsPage onBack={() => go('home')} onBackup={() => go('backup')} onLock={onLock} />
+          <SettingsPage
+          onBack={() => go('home')}
+          onBackup={() => {
+            backupReturn.current = 'settings';
+            go('backup');
+          }}
+          onLock={onLock}
+        />
         ) : null}
-        {page === 'backup' ? <BackupPage onBack={() => go('settings')} /> : null}
+        {page === 'backup' ? <BackupPage onBack={() => go(backupReturn.current)} /> : null}
       </main>
 
       {showNav ? (

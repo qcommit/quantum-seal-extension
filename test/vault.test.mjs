@@ -67,6 +67,20 @@ test('backup restores in another profile and its owner key opens with the CLI', 
   assert.equal((await second.publicInfo()).descriptors.devnet[0].wallet, d.wallet);
 });
 
+test('a wallet counts as backed up once a backup is saved or it was restored from one', async () => {
+  const first = createVaultStore(fakeStorage());
+  await first.create(pass);
+  assert.equal((await first.publicInfo()).backedUp, false);
+  const backup = await first.exportBackup();
+  assert.equal((await first.publicInfo()).backedUp, false, 'exporting alone is not saving');
+  await first.markBackedUp();
+  assert.equal((await first.publicInfo()).backedUp, true);
+  const second = createVaultStore(fakeStorage());
+  await second.importBackup(JSON.stringify(backup), pass);
+  assert.equal((await second.publicInfo()).backedUp, true);
+  await assert.rejects(createVaultStore(fakeStorage()).markBackedUp(), /No wallet/);
+});
+
 // A backup whose keystores are genuine (the real passphrase opens them) but whose public
 // descriptors were edited by someone else.
 async function tamperedBackup(policyFor) {

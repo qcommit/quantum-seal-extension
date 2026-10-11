@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { BUILT_IN } from '../networks.js';
 import { FEE_FLOAT_LAMPORTS } from '../wallet-service.js';
 import {
+  vault,
   service,
   lamportsToSol,
   solDisplay,
@@ -37,12 +38,36 @@ import {
   Inbox,
   Refresh,
   SendArrow,
+  Shield,
 } from './icons.jsx';
 
 // Setup keeps a fee float on the setup address; anything above it moves into the wallet.
 export const SETUP_MINIMUM_LAMPORTS = FEE_FLOAT_LAMPORTS + 10000000n;
 
-export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSettings }) {
+// Shown until a backup is saved: with no seed phrase, the backup file is the only way to
+// restore this wallet if the browser profile is lost.
+function BackupReminder({ reloadKey, onBackup }) {
+  const info = useLoad(() => vault.publicInfo(), [reloadKey]);
+  if (!info.data || info.data.backedUp) return null;
+  return (
+    <div className="fee-card backup-card" role="status">
+      <div className="fee-card-top">
+        <span className="fee-icon" aria-hidden="true">
+          <Shield size={18} />
+        </span>
+        <p>
+          Back up your wallet
+          <span>There is no seed phrase. Your backup file is the only way to restore this wallet if this browser is lost.</span>
+        </p>
+      </div>
+      <button type="button" className="secondary" onClick={onBackup}>
+        Back up now
+      </button>
+    </div>
+  );
+}
+
+export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSettings, onBackup }) {
   const [poll, setPoll] = useState(0);
   const setup = useAction();
   const sweep = useAction();
@@ -95,6 +120,7 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
         refreshing={overview.loading}
         onRefresh={() => setPoll((p) => p + 1)}
         error={overview.error}
+        reminder={<BackupReminder reloadKey={reloadKey} onBackup={onBackup} />}
       />
     );
 
@@ -123,6 +149,7 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
       </div>
 
       <div className="home-status">
+        <BackupReminder reloadKey={reloadKey} onBackup={onBackup} />
         {overview.error ? <Notice kind="error">{errorText(overview.error)}</Notice> : null}
         {lowFees ? (
           <div className="fee-card" role="status">
@@ -297,7 +324,7 @@ function WalletChip({ address }) {
   );
 }
 
-function Setup({ o, action, refreshing, onRefresh, error }) {
+function Setup({ o, action, refreshing, onRefresh, error, reminder }) {
   const enough = o.feeLamports >= SETUP_MINIMUM_LAMPORTS;
   return (
     <div className="setup">
@@ -327,6 +354,7 @@ function Setup({ o, action, refreshing, onRefresh, error }) {
         </button>
       </div>
       {error ? <Notice kind="error">{errorText(error)}</Notice> : null}
+      {reminder}
       {enough ? (
         <>
           <ActionButton

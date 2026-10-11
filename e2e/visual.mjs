@@ -86,6 +86,7 @@ const SCENES = [
   ['home', 'popup', 'home', POPUP],
   ['home-end', 'popup', 'home', POPUP, [scrollEnd]],
   ['home-mainnet', 'popup', 'home-mainnet', POPUP],
+  ['home-nobackup', 'popup', 'home-nobackup', POPUP],
   ['home-empty', 'popup', 'home-empty', POPUP, [scrollEnd]],
   ['home-low', 'popup', 'home-low', POPUP],
   ['home-low-end', 'popup', 'home-low', POPUP, [scrollEnd]],

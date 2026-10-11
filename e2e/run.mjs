@@ -474,9 +474,9 @@ try {
   await popup.locator('.balance .amount').waitFor({ timeout: 60000 });
   step('lock clears access; a wrong passphrase is refused; the right one unlocks');
 
-  // 9. Backup download.
-  await popup.getByRole('button', { name: 'Settings', exact: true }).click();
-  await popup.getByRole('button', { name: 'Back up wallet' }).click();
+  // 9. Backup download, from Home's reminder; once saved, the reminder is gone.
+  await popup.getByText('Back up your wallet').waitFor({ timeout: 30000 });
+  await popup.getByRole('button', { name: 'Back up now' }).click();
   const downloadPromise = popup.waitForEvent('download');
   await popup.getByRole('button', { name: 'Download backup' }).click();
   const download = await downloadPromise;
@@ -485,7 +485,10 @@ try {
   assert.equal(backup.owner.format, 'quantum-seal/keystore/1');
   assert.ok(backup.descriptors.localnet.some((d) => d.wallet === walletAddress.toBase58()));
   assert.ok(!JSON.stringify(backup).includes('"secretKey"'));
-  step('backup downloads encrypted keys plus the wallet descriptor');
+  await popup.getByRole('button', { name: 'Back', exact: true }).click();
+  await popup.locator('.balance .amount').waitFor({ timeout: 60000 });
+  assert.equal(await popup.getByText('Back up your wallet').count(), 0);
+  step('backup downloads encrypted keys plus the wallet descriptor; the Home reminder clears');
 
   // 10. Settings UI and auto-lock: set one minute, stay idle, and the wallet locks itself.
   await popup.getByRole('button', { name: 'Settings', exact: true }).click();
