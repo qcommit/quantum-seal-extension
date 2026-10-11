@@ -44,7 +44,7 @@ Hold, send and receive Solana assets using post-quantum signatures.
 
 - Does not collect or transmit personal data to the developer.
 - Website content, browsing history, location and personal communications: not accessed.
-- Privacy policy: `PRIVACY.md` (host it at a public URL before submission, e.g. on the website).
+- Privacy policy URL: https://quantum-seal.vercel.app/privacy.html#extension (mirrors `PRIVACY.md`).
 
 ## Package
 
@@ -78,5 +78,5 @@ Balances and addresses in the images are fixtures, not real wallets.
 
 1. Mainnet deployed, immutable, and pinned (`docs/LAUNCH.md` in the core repository, step 6).
 2. `npm test && npm run e2e` pass, then `npm run package` (no `--draft`).
-3. Privacy policy hosted at a public URL (the website's `/privacy` page).
+3. Privacy policy URL above still matches `PRIVACY.md`.
 4. Version in `src/manifest.json` and `package.json` bumped for each upload.
