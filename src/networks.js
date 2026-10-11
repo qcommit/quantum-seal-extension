@@ -18,7 +18,7 @@ export const BUILT_IN = Object.freeze({
     rpc: 'https://api.devnet.solana.com',
     // Verified on-chain by scripts/pin-deployment.mjs on 2026-10-11.
     program: '6LBRd57jagVvhmpX1idsw9QXhoNHMHWstvpeGdSZAexT',
-    programSha256: '4fbf18f66470322941b907adf03ebcd995385d35ac8c7ae4e3aa5ef63dd7a049',
+    programSha256: 'c53d5da22ae1b2d2d7be9d568a646db79b8ee6a0e1e1bb4cd33735602ed96bc0',
     programSize: 141744,
     upgradeAuthority: 'Ds6WwjdyfQzKGsCUKKrMw1NwB14ySk2qgawtrUtsfebV',
   },
