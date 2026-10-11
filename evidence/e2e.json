@@ -1,0 +1,20 @@
+{
+  "status": "passed",
+  "finishedAt": "2026-10-11T06:00:06.509Z",
+  "program": "5mhyrSWwLXYMc7vwok5buJ6cGcwKcem7Gv8jdMAJdoYD",
+  "steps": [
+    "local validator runs the wallet program",
+    "extension loads and is pinned to the local deployment",
+    "wallet keys are created and the setup address is shown",
+    "one funding transfer creates the wallet and moves the rest behind the post-quantum key",
+    "receive shows the program-owned wallet address with a QR code",
+    "the review window shows the decoded recipient, amount and fee refill before signing",
+    "a send is interrupted by closing its window mid-upload",
+    "the resumed send completes with exactly 11 uploaded chunks and the exact amount",
+    "the fee refund keeps the fee key topped up",
+    "home lists the wallet’s SPL token balance",
+    "an SPL token send completes through the review window",
+    "lock clears access; a wrong passphrase is refused; the right one unlocks",
+    "backup downloads encrypted keys plus the wallet descriptor"
+  ]
+}

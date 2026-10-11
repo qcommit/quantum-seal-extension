@@ -1,0 +1,25 @@
+{
+  "name": "quantum-seal-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Quantum Seal browser extension: a post-quantum Solana wallet (send, receive, hold).",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "e2e": "node e2e/run.mjs"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0",
+    "@noble/post-quantum": "0.7.1",
+    "@solana/web3.js": "3.0.2",
+    "buffer": "6.0.3",
+    "qrcode-generator": "1.4.4",
+    "quantum-seal-wallet": "file:../quantum-seal-wallet"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10",
+    "playwright-core": "1.63.0"
+  }
+}
