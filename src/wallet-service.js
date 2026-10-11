@@ -597,41 +597,17 @@ export function createWalletService({
       const { network, connection, deployment } = await session();
       const d = await descriptor();
       const info = await ownerInfo();
-      const status = await ownStatus(network, d);
       const feePayer = new PublicKey(info.feePayer);
-      const feeLamports = BigInt(await connection.getBalance(feePayer, network.commitment));
+      // Independent reads run together: on public endpoints each is a round trip.
+      const [status, feeLamports, cost] = await Promise.all([
+        ownStatus(network, d),
+        connection.getBalance(feePayer, network.commitment).then(BigInt),
+        executionCost(network, 1),
+      ]);
       const tokens = [];
-      if (status.initialized) {
-        const parsed = await connection.getParsedTokenAccountsByOwner(
-          new PublicKey(d.wallet),
-          { programId: TOKEN_PROGRAM },
-          network.commitment,
-        );
-        // Token-2022 balances are listed too, so they are never invisible, but marked: this
-        // version only sends classic SPL tokens. A failed lookup never hides the rest.
-        const extended = await connection
-          .getParsedTokenAccountsByOwner(new PublicKey(d.wallet), { programId: new PublicKey(TOKEN_2022) }, network.commitment)
-          .catch(() => ({ value: [] }));
-        for (const [list, token2022] of [
-          [parsed.value, false],
-          [extended.value, true],
-        ])
-          for (const { pubkey, account } of list) {
-            const t = account.data.parsed?.info;
-            if (!t || (token2022 && t.tokenAmount.amount === '0')) continue;
-            tokens.push({
-              account: pubkey.toBase58(),
-              mint: t.mint,
-              amount: t.tokenAmount.amount,
-              decimals: t.tokenAmount.decimals,
-              uiAmount: t.tokenAmount.uiAmountString,
-              ...(token2022 ? { token2022: true } : {}),
-            });
-          }
-      }
       // Wallets of earlier deployments on this network (e.g. before a re-pin) that still
       // hold SOL: they stay listed so their funds are not forgotten.
-      const otherWallets = [];
+      const others = [];
       for (const other of info.descriptors[deployment.cluster] ?? []) {
         if (other.wallet === d.wallet || other.genesis !== network.genesis) continue;
         try {
@@ -639,10 +615,40 @@ export function createWalletService({
         } catch {
           continue;
         }
-        const lamports = BigInt(await connection.getBalance(new PublicKey(other.wallet), network.commitment));
-        if (lamports > 0n) otherWallets.push({ wallet: other.wallet, program: other.program, lamports });
+        others.push(other);
       }
-      const cost = await executionCost(network, 1);
+      const [parsed, extended, otherBalances] = await Promise.all([
+        status.initialized
+          ? connection.getParsedTokenAccountsByOwner(new PublicKey(d.wallet), { programId: TOKEN_PROGRAM }, network.commitment)
+          : { value: [] },
+        // Token-2022 balances are listed too, so they are never invisible, but marked: this
+        // version only sends classic SPL tokens. A failed lookup never hides the rest.
+        status.initialized
+          ? connection
+              .getParsedTokenAccountsByOwner(new PublicKey(d.wallet), { programId: new PublicKey(TOKEN_2022) }, network.commitment)
+              .catch(() => ({ value: [] }))
+          : { value: [] },
+        Promise.all(others.map((o) => connection.getBalance(new PublicKey(o.wallet), network.commitment).then(BigInt))),
+      ]);
+      for (const [list, token2022] of [
+        [parsed.value, false],
+        [extended.value, true],
+      ])
+        for (const { pubkey, account } of list) {
+          const t = account.data.parsed?.info;
+          if (!t || (token2022 && t.tokenAmount.amount === '0')) continue;
+          tokens.push({
+            account: pubkey.toBase58(),
+            mint: t.mint,
+            amount: t.tokenAmount.amount,
+            decimals: t.tokenAmount.decimals,
+            uiAmount: t.tokenAmount.uiAmountString,
+            ...(token2022 ? { token2022: true } : {}),
+          });
+        }
+      const otherWallets = others
+        .map((o, i) => ({ wallet: o.wallet, program: o.program, lamports: otherBalances[i] }))
+        .filter((o) => o.lamports > 0n);
       const sweepable =
         status.initialized && feeLamports >= FEE_FLOAT_LAMPORTS + SWEEP_MINIMUM_LAMPORTS
           ? feeLamports - FEE_FLOAT_LAMPORTS
