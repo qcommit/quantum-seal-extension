@@ -583,3 +583,19 @@ test('createRecipientTokenAccount opens the recipient token account from the fee
   await assert.rejects(t.service.createRecipientTokenAccount({ to, mint: await key() }), /not a classic SPL token/);
   await assert.rejects(t.service.createRecipientTokenAccount({ to: t.d.wallet, mint }), /own address/);
 });
+
+test('recentRecipients lists delivered sends on this network, newest first, without the fee address', async () => {
+  const t = await setup();
+  const make = async (to, status, createdAt, cluster = 'localnet') => {
+    const id = `r${Math.random().toString(16).slice(2)}`;
+    await t.storage.local.set({ [`send:${id}`]: { id, cluster, status, createdAt, display: { to, asset: 'SOL', amount: '1' }, records: [] } });
+  };
+  const [a, b, c] = [await key(), await key(), await key()];
+  await make(a, 'done', '2026-10-01T00:00:00Z');
+  await make(b, 'done', '2026-10-03T00:00:00Z');
+  await make(a, 'done', '2026-10-04T00:00:00Z');
+  await make(c, 'failed', '2026-10-05T00:00:00Z');
+  await make(c, 'done', '2026-10-06T00:00:00Z', 'devnet');
+  await make(t.created.feePayer, 'done', '2026-10-07T00:00:00Z');
+  assert.deepEqual((await t.service.recentRecipients()).map((r) => r.address), [a, b]);
+});

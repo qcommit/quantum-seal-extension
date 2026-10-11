@@ -341,6 +341,8 @@ try {
   await popup.getByRole('button', { name: 'Send', exact: true }).click();
   await popup.getByRole('button', { name: /^Asset:/ }).click();
   await popup.getByRole('dialog').locator(`[data-asset="${mint.publicKey.toBase58()}"]`).click();
+  // Earlier recipients are offered for reuse.
+  await popup.getByRole('button', { name: `Recent recipient ${recipient.toBase58()}` }).waitFor({ timeout: 30000 });
   await popup.getByPlaceholder('Recipient address').fill(newcomer.toBase58());
   await popup.getByPlaceholder('Amount').fill('0.5');
   await popup.getByRole('button', { name: 'Review' }).click();
@@ -354,7 +356,7 @@ try {
   await newcomerReview.getByText('Sent.').waitFor({ timeout: 180000 });
   assert.equal((await connection.getTokenAccountBalance(await ataOf(newcomer), 'confirmed')).value.amount, '500000');
   await newcomerReview.close();
-  step('a token send to a new holder opens their token account (after asking) and delivers');
+  step('Send offers recent recipients; a token send to a new holder opens their token account (after asking) and delivers');
 
   // 7b. An unclear outcome: the RPC fails one transaction submission mid-send. The send
   // stops as "uncertain", the signature is checked, and resuming completes it once.

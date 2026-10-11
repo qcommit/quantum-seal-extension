@@ -1,6 +1,6 @@
 // Send: pick an asset, enter recipient and amount, then review in a separate window.
 import { useState } from 'react';
-import { service, lamportsToSol, errorText, openReview, solDisplay } from './common.js';
+import { service, lamportsToSol, errorText, openReview, solDisplay, short } from './common.js';
 import { NEEDS_TOKEN_ACCOUNT } from '../wallet-service.js';
 import { knownToken, tokenLabel } from '../tokens.js';
 import { ActionButton, ActionNotice, Field, Loading, Notice, Sheet, useAction, useLoad } from './components.jsx';
@@ -8,6 +8,7 @@ import { ArrowLeft, Check, ChevronDown, Coins, Shield } from './icons.jsx';
 
 export function SendPage({ onBack }) {
   const overview = useLoad(() => service.overview(), []);
+  const recent = useLoad(() => service.recentRecipients(), []);
   const [asset, setAsset] = useState('SOL');
   const [picking, setPicking] = useState(false);
   const [to, setTo] = useState('');
@@ -112,6 +113,25 @@ export function SendPage({ onBack }) {
               autoComplete="off"
             />
           </Field>
+          {!to.trim() && recent.data?.length ? (
+            <div className="recent" role="group" aria-label="Recent recipients">
+              <span className="field-label">Recent</span>
+              <div className="recent-list">
+                {recent.data.map((r) => (
+                  <button
+                    type="button"
+                    key={r.address}
+                    className="recent-chip"
+                    title={r.address}
+                    aria-label={`Recent recipient ${r.address}`}
+                    onClick={() => edit(setTo)(r.address)}
+                  >
+                    {short(r.address, 5)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <Field
             label="Amount"
             unit={asset === 'SOL' ? 'SOL' : (knownToken(o?.cluster, asset)?.symbol ?? 'tokens')}

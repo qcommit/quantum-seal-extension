@@ -117,7 +117,7 @@ const SCENES = [
     POPUP,
     [
       click('Send', { exact: true }),
-      async (p) => p.getByLabel('To').fill('5vVevv3JNQRKP8Xtqhs5FXLR1vGQ1wVh4HMjqfchFsJy'),
+      async (p) => p.getByLabel('To', { exact: true }).fill('5vVevv3JNQRKP8Xtqhs5FXLR1vGQ1wVh4HMjqfchFsJy'),
       async (p) => p.getByLabel('Amount').fill('0.25'),
       click('Review'),
     ],
@@ -131,7 +131,7 @@ const SCENES = [
       click('Send', { exact: true }),
       click(/^Asset/),
       async (p) => p.getByRole('dialog').locator('.wallet-row').nth(1).click(),
-      async (p) => p.getByLabel('To').fill('5vVevv3JNQRKP8Xtqhs5FXLR1vGQ1wVh4HMjqfchFsJy'),
+      async (p) => p.getByLabel('To', { exact: true }).fill('5vVevv3JNQRKP8Xtqhs5FXLR1vGQ1wVh4HMjqfchFsJy'),
       async (p) => p.getByLabel('Amount').fill('2'),
       click('Review'),
     ],

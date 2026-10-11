@@ -256,6 +256,9 @@ export const service = {
     throw error;
   },
   createRecipientTokenAccount: never,
+  async recentRecipients() {
+    return scene === 'home' ? [{ address: TO }, { address: FEE.replace(/^./, 'H') }] : [];
+  },
   setupWallet: never,
   sweepExcess: never,
   topUpFeeKey: never,

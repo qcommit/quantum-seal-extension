@@ -1046,6 +1046,21 @@ export function createWalletService({
       await confirmByPolling(connection, signature, latest.lastValidBlockHeight, network.commitment);
       return { address: destination.toBase58(), created: true, signature, rentLamports: rent };
     },
+    // Addresses this wallet sent to on the current network, newest first: delivered sends
+    // only (never a typo that failed), without your own fee address (top-ups).
+    async recentRecipients(limit = 4) {
+      const { deployment } = await session();
+      const info = await ownerInfo();
+      const seen = new Set([info.feePayer]);
+      const out = [];
+      for (const r of (await allSends()).sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
+        if (r.cluster !== deployment.cluster || r.status !== 'done' || !r.display?.to || seen.has(r.display.to)) continue;
+        seen.add(r.display.to);
+        out.push({ address: r.display.to, at: r.createdAt });
+        if (out.length >= limit) break;
+      }
+      return out;
+    },
     async listSends() {
       return (await allSends()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     },
