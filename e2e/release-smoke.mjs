@@ -13,6 +13,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright-core';
+import { BUILT_IN, defaultCluster } from '../src/networks.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
@@ -40,6 +41,11 @@ try {
   popup.on('pageerror', (e) => errors.push(e.message));
   await popup.setViewportSize({ width: 400, height: 600 });
   await popup.goto(`chrome-extension://${id}/popup.html`);
+  // Keep this rehearsal on devnet even after mainnet becomes the install default.
+  // No mainnet wallet is funded or initialized by this smoke test.
+  await popup.evaluate(async () => {
+    await chrome.storage.local.set({ settings: { cluster: 'devnet' } });
+  });
   await popup.getByPlaceholder('Passphrase (12+ characters)').fill(PASS);
   await popup.getByPlaceholder('Repeat passphrase').fill(PASS);
   await popup.getByRole('button', { name: 'Create wallet' }).click();
@@ -57,6 +63,7 @@ try {
   });
   await popup.reload();
   await popup.getByRole('heading', { name: 'Set up your wallet' }).waitFor({ timeout: 120000 });
+  assert.equal((await popup.locator('.top-title').textContent()).trim(), BUILT_IN[defaultCluster()].label);
   console.log('PASS a stale local-validator setting falls back to a built-in network');
   assert.deepEqual(errors, []);
   console.log('RELEASE SMOKE PASSED');

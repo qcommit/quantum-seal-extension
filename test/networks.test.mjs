@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeSettings, deploymentFor, isAvailable, networkConfig } from '../src/networks.js';
+import { BUILT_IN, mergeSettings, deploymentFor, isAvailable, networkConfig } from '../src/networks.js';
 
 const pins = {
   program: '6LBRd57jagVvhmpX1idsw9QXhoNHMHWstvpeGdSZAexT',
@@ -11,8 +11,9 @@ const pins = {
 
 test('a network is unavailable until its deployment is pinned', () => {
   const s = mergeSettings(null);
-  assert.equal(isAvailable(deploymentFor(s, 'mainnet-beta')), false);
-  assert.throws(() => networkConfig(deploymentFor(s, 'mainnet-beta')), /not available/);
+  const unpinned = { ...deploymentFor(s, 'mainnet-beta'), program: null, programSha256: null, programSize: null };
+  assert.equal(isAvailable(unpinned), false);
+  assert.throws(() => networkConfig(unpinned), /not available/);
 });
 
 test('developer pins apply to devnet but can never change mainnet', () => {
@@ -20,7 +21,10 @@ test('developer pins apply to devnet but can never change mainnet', () => {
   const devnet = deploymentFor(s, 'devnet');
   assert.equal(isAvailable(devnet), true);
   assert.equal(networkConfig(devnet).program, pins.program);
-  assert.equal(deploymentFor(s, 'mainnet-beta').program, null);
+  assert.equal(deploymentFor(s, 'mainnet-beta').program, BUILT_IN['mainnet-beta'].program);
+  assert.equal(deploymentFor(s, 'mainnet-beta').programSha256, BUILT_IN['mainnet-beta'].programSha256);
+  assert.equal(deploymentFor(s, 'mainnet-beta').programSize, BUILT_IN['mainnet-beta'].programSize);
+  assert.equal(deploymentFor(s, 'mainnet-beta').upgradeAuthority, BUILT_IN['mainnet-beta'].upgradeAuthority);
 });
 
 test('public RPC overrides must use HTTPS', () => {
@@ -39,7 +43,7 @@ test('the built-in devnet deployment is pinned and parses', () => {
 test('new installs default to mainnet only once mainnet is pinned', async () => {
   const { defaultCluster, BUILT_IN, isTestNetwork } = await import('../src/networks.js');
   assert.equal(defaultCluster(), BUILT_IN['mainnet-beta'].program ? 'mainnet-beta' : 'devnet');
-  assert.equal(defaultCluster({ 'mainnet-beta': { ...BUILT_IN['mainnet-beta'] } }), 'devnet');
+  assert.equal(defaultCluster({ 'mainnet-beta': { ...BUILT_IN['mainnet-beta'], program: null, programSha256: null, programSize: null } }), 'devnet');
   assert.equal(defaultCluster({ 'mainnet-beta': { ...BUILT_IN['mainnet-beta'], ...pins, upgradeAuthority: null } }), 'mainnet-beta');
   assert.equal(mergeSettings(null).cluster, defaultCluster());
   assert.equal(mergeSettings({ cluster: 'localnet' }).cluster, 'localnet');

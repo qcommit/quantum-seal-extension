@@ -12,10 +12,15 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { BUILT_IN } from '../src/networks.js';
+import { hasValidMainnetPins } from './release-network.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
 const draft = process.argv.includes('--draft');
+const pinned = hasValidMainnetPins(BUILT_IN['mainnet-beta']);
+if (!pinned && !draft)
+  throw new Error('Mainnet is not pinned yet (run scripts/pin-deployment.mjs first), or pass --draft.');
 
 execFileSync(process.execPath, [join(root, 'scripts/build.mjs'), '--release'], { stdio: 'inherit' });
 
@@ -24,13 +29,6 @@ if (!info.release || !info.core.matchesPin) throw new Error('dist/ is not a rele
 const manifest = JSON.parse(readFileSync(join(dist, 'manifest.json'), 'utf8'));
 if (manifest.host_permissions.some((h) => !h.startsWith('https://')))
   throw new Error('Release manifest must only request HTTPS hosts.');
-
-// Mainnet pins live in src/networks.js; a store build without them would only show devnet.
-const networks = readFileSync(join(root, 'src/networks.js'), 'utf8');
-const mainnet = networks.slice(networks.indexOf("'mainnet-beta'"), networks.indexOf('devnet:'));
-const pinned = !/program:\s*null/.test(mainnet);
-if (!pinned && !draft)
-  throw new Error('Mainnet is not pinned yet (run scripts/pin-deployment.mjs first), or pass --draft.');
 
 // Deterministic archive: sorted entries, fixed mtime, no extra attributes.
 const entries = [];
@@ -47,7 +45,7 @@ for (const f of entries) utimesSync(join(dist, f), fixed, fixed);
 
 const out = join(root, 'release');
 mkdirSync(out, { recursive: true });
-const name = `quantum-seal-extension-${manifest.version}${pinned ? '' : '-draft'}.zip`;
+const name = `quantum-seal-extension-${manifest.version}${draft ? '-draft' : ''}.zip`;
 const zip = join(out, name);
 rmSync(zip, { force: true });
 execFileSync('zip', ['-X', '-q', '-9', zip, ...entries], { cwd: dist, stdio: 'inherit' });
@@ -57,4 +55,4 @@ writeFileSync(`${zip}.sha256`, `${digest}  ${name}\n`);
 console.log(`\n${relative(root, zip)}  (${entries.length} files)`);
 console.log(`sha256 ${digest}`);
 console.log(`core   ${info.core.commit}`);
-if (!pinned) console.log('DRAFT: mainnet is not pinned; do not submit this archive.');
+if (draft) console.log(`DRAFT: ${pinned ? 'explicit rehearsal build' : 'mainnet is not pinned'}; do not submit this archive.`);
