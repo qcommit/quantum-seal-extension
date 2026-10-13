@@ -142,7 +142,7 @@ try {
   await popup.setViewportSize({ width: 400, height: 600 });
   const popupUrl = `chrome-extension://${extensionId}/popup.html`;
   await popup.goto(`${popupUrl}?failStorage=vault`);
-  await popup.getByRole('heading', { name: 'Could not open Quantum Seal' }).waitFor();
+  await popup.getByRole('heading', { name: 'Could not open QuantumPocket' }).waitFor();
   await shot(popup, '00-open-error');
   await popup.getByRole('button', { name: 'Try again', exact: true }).click();
   await popup.getByPlaceholder('Passphrase (12+ characters)').waitFor();
@@ -280,15 +280,27 @@ try {
   step('the review window shows the decoded recipient, amount and fee refill before signing');
   const reviewUrl = review.url();
   await review.getByRole('button', { name: 'Approve & send' }).click();
-  // Interrupt deterministically: close the window right after the 2nd chunk confirms.
+  // Close once at least two chunks have confirmed. Another transaction may land before
+  // its confirmation callback is journaled: process interruption cannot undo that upload.
+  let interruptedSendRecord;
   for (let i = 0; ; i++) {
-    const chunks =
-      (await journal(popup))[0]?.records.filter((r) => r.phase === 'confirmed' && r.label.includes('upload-chunk')).length ?? 0;
-    if (chunks >= 2) break;
+    const current = (await journal(popup))[0];
+    const chunks = current?.records.filter((r) => r.phase === 'confirmed' && r.label.includes('upload-chunk')).length ?? 0;
+    if (chunks >= 2) { interruptedSendRecord = current; break; }
     if (i > 2400) throw new Error('Upload never started.');
     await sleep(25);
   }
+  // The approval is public signature material. Keep it before successful execution clears
+  // the journal's copy, so the test can compare every uploaded byte against what was signed.
+  assert.ok(interruptedSendRecord.approval, 'the interrupted send retains its signed approval');
+  const signedSignature = Buffer.from(interruptedSendRecord.approval.signature, 'base64');
+  assert.equal(signedSignature.length, 7856, 'SLH-DSA-SHA2-128s signature length');
   await review.close();
+  const [sendProof] = await PublicKey.findProgramAddress(
+    [Buffer.from('proof'), walletAddress.toBytes(), Buffer.from(interruptedSendRecord.digest, 'hex'),
+      Buffer.from([interruptedSendRecord.approval.index]), feeKey.toBytes()],
+    programId,
+  );
   step('a send is interrupted by closing its window mid-upload');
   review = await context.newPage();
   await review.goto(reviewUrl);
@@ -305,8 +317,49 @@ try {
   const received = BigInt(await connection.getBalance(recipient, 'confirmed'));
   assert.equal(received, 1000000n + 250000000n);
   const sendRecord = (await journal(review))[0];
-  const chunks = sendRecord.records.filter((r) => r.phase === 'confirmed' && r.label.includes('upload-chunk')).length;
-  assert.equal(chunks, 11);
+  // Prepared signatures are persisted before broadcast. Confirmed callbacks are not
+  // exhaustive after abrupt closure, so verify successful uploads from actual chain
+  // transactions, including any upload that landed while its page was disappearing.
+  const preparedUploads = [...new Set(sendRecord.records
+    .filter((r) => r.phase === 'prepared' && r.label.includes('upload-chunk'))
+    .map((r) => r.signature))];
+  const transactions = new Map();
+  // Bound metadata polling across all candidates. A prepared-but-unbroadcast signature
+  // legitimately has no transaction; exactly eleven successful appends must still exist.
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await Promise.all(preparedUploads.filter((sig) => !transactions.has(sig)).map(async (sig) => {
+      const tx = await connection.getTransaction(sig, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+      if (tx?.meta) transactions.set(sig, tx);
+    }));
+    if (transactions.size === preparedUploads.length) break;
+    await sleep(250);
+  }
+  const uploaded = [];
+  for (const [signature, tx] of transactions) {
+    if (tx.meta.err) continue;
+    const message = tx.transaction.message;
+    const keys = message.staticAccountKeys ?? message.accountKeys;
+    const appends = message.compiledInstructions.filter((ix) =>
+      keys[ix.programIdIndex].toBase58() === programId.toBase58() && ix.data[0] === 2);
+    assert.equal(appends.length, 1, `one append in successful upload ${signature}`);
+    const append = appends[0];
+    const accounts = append.accountKeyIndexes ?? append.accounts;
+    assert.equal(keys[accounts[0]].toBase58(), walletAddress.toBase58(), 'append targets this wallet');
+    assert.equal(keys[accounts[1]].toBase58(), sendProof.toBase58(), 'append targets this approval proof');
+    assert.equal(keys[accounts[2]].toBase58(), feeKey.toBase58(), 'append uses this uploader');
+    const data = Buffer.from(append.data);
+    assert.ok(data.length > 3, 'append has an offset and signature payload');
+    uploaded.push({ offset: data.readUInt16LE(1), payload: data.subarray(3) });
+  }
+  uploaded.sort((a, b) => a.offset - b.offset);
+  assert.equal(uploaded.length, 11, 'exactly eleven successful upload transactions on chain');
+  assert.deepEqual(uploaded.map((chunk) => chunk.offset), Array.from({ length: 11 }, (_, i) => i * 768),
+    'each signature offset is uploaded exactly once, without gaps or duplicate uploads');
+  for (const { offset, payload } of uploaded) {
+    assert.equal(payload.length, Math.min(768, signedSignature.length - offset), `chunk length at offset ${offset}`);
+    assert.deepEqual(payload, signedSignature.subarray(offset, offset + payload.length), `signed bytes at offset ${offset}`);
+  }
+  assert.equal(uploaded.reduce((sum, chunk) => sum + chunk.payload.length, 0), 7856, 'complete signature byte coverage');
   step('the resumed send completes with exactly 11 uploaded chunks and the exact amount');
   const feeAfterSend = BigInt(await connection.getBalance(feeKey, 'confirmed'));
   assert.ok(feeAfterSend > feeAfterSetup - 100000n, `fee key ${feeAfterSetup} -> ${feeAfterSend}`);

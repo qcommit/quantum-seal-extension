@@ -15,7 +15,7 @@ export function Welcome({ onDone }) {
       <main className="gate-body">
         <div className="gate-hero">
           <Mark size="lg" />
-          <p className="gate-name">Quantum Seal</p>
+          <p className="gate-name">QuantumPocket</p>
           <h1>A post-quantum wallet for Solana</h1>
           <p className="gate-copy">
             Your keys are created and encrypted on this device. Transfers are approved with SLH-DSA (FIPS 205).
@@ -148,7 +148,7 @@ function RestoreForm({ onDone }) {
       />
       <p className="hint">
         <Shield size={14} />
-        <span>Restores your encrypted keys and wallet addresses from a Quantum Seal backup file.</span>
+        <span>Restores your encrypted keys and wallet addresses from a QuantumPocket backup file.</span>
       </p>
       <ActionButton busy={busy} onClick={restore}>
         Restore wallet
@@ -168,7 +168,7 @@ export function Unlock({ onDone }) {
           <RemoveWallet
             locked
             onRemoved={onDone}
-            intro={<p>Nobody can recover a passphrase, including Quantum Seal.</p>}
+            intro={<p>Nobody can recover a passphrase, including QuantumPocket.</p>}
           />
         </main>
       </div>
@@ -199,7 +199,7 @@ function UnlockForm({ onDone, onForgot }) {
         <div className="gate-hero">
           <Mark size="lg" />
           <h1>Welcome back</h1>
-          <p className="gate-copy">Enter your passphrase to unlock Quantum Seal.</p>
+          <p className="gate-copy">Enter your passphrase to unlock QuantumPocket.</p>
         </div>
         <div className="form-stack">
           <input
@@ -221,7 +221,7 @@ function UnlockForm({ onDone, onForgot }) {
           </button>
         </div>
       </main>
-      <footer className="gate-foot">Quantum Seal locks itself after a period of inactivity.</footer>
+      <footer className="gate-foot">QuantumPocket locks itself after a period of inactivity.</footer>
     </div>
   );
 }

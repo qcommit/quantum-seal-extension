@@ -173,7 +173,7 @@ export function SendPage({ onBack }) {
                 <p>
                   The recipient has no account for this token yet
                   <span>
-                    Quantum Seal can open one for them for {solDisplay(needsAccount.rentLamports, 8)} SOL, paid from your
+                    QuantumPocket can open one for them for {solDisplay(needsAccount.rentLamports, 8)} SOL, paid from your
                     fee address. The SOL stays in that account, which the recipient owns.
                   </span>
                 </p>

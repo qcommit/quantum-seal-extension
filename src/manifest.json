@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Quantum Seal",
-  "short_name": "Quantum Seal",
+  "name": "QuantumPocket",
+  "short_name": "QuantumPocket",
   "version": "0.1.0",
   "minimum_chrome_version": "120",
   "description": "A post-quantum Solana wallet. Transfers are approved with SLH-DSA (NIST FIPS 205).",
-  "action": { "default_popup": "popup.html", "default_title": "Quantum Seal" },
+  "action": { "default_popup": "popup.html", "default_title": "QuantumPocket" },
   "commands": {
-    "_execute_action": { "suggested_key": { "default": "Alt+Shift+Q" }, "description": "Open Quantum Seal" }
+    "_execute_action": { "suggested_key": { "default": "Alt+Shift+Q" }, "description": "Open QuantumPocket" }
   },
   "background": { "service_worker": "background.js", "type": "module" },
   "permissions": ["storage", "alarms", "idle"],

@@ -25,12 +25,11 @@ jobs:
           ref="$(tr -d '[:space:]' < quantum-seal-extension/CORE_REF)"
           [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || { echo "CORE_REF must be a full commit hash"; exit 1; }
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
-      # CORE_DEPLOY_KEY is a read-only deploy key on the private core repository.
+      # The core is public: fork pull requests can verify it without repository secrets.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           repository: qcommit/quantum-seal-wallet
           ref: ${{ steps.core.outputs.ref }}
-          ssh-key: ${{ secrets.CORE_DEPLOY_KEY }}
           path: quantum-seal-wallet
           persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
@@ -84,7 +83,6 @@ jobs:
         with:
           repository: qcommit/quantum-seal-wallet
           ref: ${{ steps.core.outputs.ref }}
-          ssh-key: ${{ secrets.CORE_DEPLOY_KEY }}
           path: quantum-seal-wallet
           persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444

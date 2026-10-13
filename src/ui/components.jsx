@@ -106,7 +106,7 @@ export function Empty({ icon, title, children, level = 3, tone = '', compact = f
   );
 }
 
-// The Quantum Seal mark in a round avatar. Sizes come from CSS classes (the extension's
+// The QuantumPocket mark in a round avatar. Sizes come from CSS classes (the extension's
 // CSP has no 'unsafe-inline' for styles, so no style attributes anywhere).
 export function Mark({ size = 'sm' }) {
   return (

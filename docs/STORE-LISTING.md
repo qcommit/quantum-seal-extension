@@ -5,16 +5,16 @@ Not submitted. Submit only after the mainnet program is deployed and pinned in
 
 ## Basics
 
-- **Name:** Quantum Seal
+- **Name:** QuantumPocket
 - **Summary (132 chars max):** A post-quantum Solana wallet. Every transfer is approved with SLH-DSA, NIST's hash-based signature standard.
 - **Category:** Productivity → Tools (wallets are listed under Productivity)
 - **Language:** English
 
 ## Description
 
-Quantum Seal is a Solana wallet built for the quantum era. Your Solana address is
+QuantumPocket is a Solana wallet built for the quantum era. Your Solana address is
 normally an Ed25519 public key, and a large enough quantum computer could turn that
-public key into your private key. Quantum Seal approves every transfer with SLH-DSA
+public key into your private key. QuantumPocket approves every transfer with SLH-DSA
 (NIST FIPS 205), a hash-based signature, and the wallet program checks it on-chain before
 any funds move.
 
@@ -22,7 +22,7 @@ any funds move.
 - Review the exact transfer, including the total leaving your wallet, in the extension's own window before signing
 - Interrupted sends resume from on-chain state; unclear outcomes are checked, never re-sent blindly
 - Wrong-address protection: sends to your own wallet, programs, token mints or token accounts are stopped
-- Sending tokens to someone new? Quantum Seal can open their token account for you
+- Sending tokens to someone new? QuantumPocket can open their token account for you
 - Keys stay on your device, encrypted with your passphrase; auto-lock, and an optional passphrase check before every approval
 - One encrypted backup file restores your wallet and its address in any browser
 - No account, no analytics, no tracking

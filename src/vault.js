@@ -19,7 +19,7 @@ const LABELS = { 'mainnet-beta': 'Mainnet', devnet: 'Devnet', localnet: 'Local v
 // is stored. Returns the canonical lists.
 async function checkedDescriptors(input, ownerPublicKey) {
   if (input !== undefined && (input === null || typeof input !== 'object' || Array.isArray(input)))
-    throw new Error('Not a Quantum Seal backup.');
+    throw new Error('Not a QuantumPocket backup.');
   const lists = descriptorLists(input);
   const out = {};
   for (const [cluster, list] of Object.entries(lists)) {
@@ -91,19 +91,19 @@ export function createVaultStore(storage) {
       return withLock('vault', async () => {
         if (await read()) throw new Error('A wallet already exists in this browser profile.');
         if (typeof text === 'string' && text.length > MAX_BACKUP_BYTES)
-          throw new Error('Not a Quantum Seal backup.');
+          throw new Error('Not a QuantumPocket backup.');
         let backup;
         try {
           backup = typeof text === 'string' ? JSON.parse(text) : text;
         } catch {
-          throw new Error('Not a Quantum Seal backup.');
+          throw new Error('Not a QuantumPocket backup.');
         }
-        if (!backup || backup.format !== BACKUP_FORMAT) throw new Error('Not a Quantum Seal backup.');
+        if (!backup || backup.format !== BACKUP_FORMAT) throw new Error('Not a QuantumPocket backup.');
         const owner = await decryptKey(backup.owner, password);
         const fee = await decryptKey(backup.fee, password, FEE_KEY_ALGORITHM);
         try {
           const ownerPublicKey = hex(owner.slice(32));
-          if (ownerPublicKey !== backup.owner.publicKey) throw new Error('Not a Quantum Seal backup.');
+          if (ownerPublicKey !== backup.owner.publicKey) throw new Error('Not a QuantumPocket backup.');
           const descriptors = await checkedDescriptors(backup.descriptors, ownerPublicKey);
           const feePayer = (await Keypair.fromSecretKey(fee)).publicKey.toBase58();
           await storage.local.set({

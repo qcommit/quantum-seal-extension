@@ -254,7 +254,7 @@ async function checkRecipient(connection, network, recipient, wallet, ownWallets
     throw new Error('That is this wallet’s own address. Enter the address you want to send to.');
   if (ownWallets.includes(address))
     throw new Error(
-      'That is an older wallet of yours from an earlier version of the Quantum Seal program, which this version cannot move funds out of. Enter another address.',
+      'That is an older wallet of yours from an earlier version of the QuantumPocket program, which this version cannot move funds out of. Enter another address.',
     );
   const info = await connection.getAccountInfo(recipient, network.commitment);
   if (!info) {

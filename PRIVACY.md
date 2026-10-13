@@ -1,9 +1,9 @@
-# Quantum Seal extension: privacy policy
+# QuantumPocket extension: privacy policy
 
 Last updated: October 11, 2026 (permissions narrowed)
 
 **The short version:** the extension keeps your keys on your device, encrypted with your
-passphrase. There is no Quantum Seal account, server, analytics or tracking. The only
+passphrase. There is no QuantumPocket account, server, analytics or tracking. The only
 network requests go to the Solana RPC endpoint you use.
 
 ## What the extension stores, and where
@@ -30,7 +30,7 @@ keep a backup file.
   wallet, and the transactions you approve. The RPC operator can see your IP address and the public addresses involved.
 - **Transactions you approve** are published on the Solana blockchain, which is public.
 
-The extension does not contact any Quantum Seal server, does not use analytics or
+The extension does not contact any QuantumPocket server, does not use analytics or
 advertising, does not read web pages, and does not request access to your browsing
 history. It does not inject anything into websites.
 
@@ -55,4 +55,8 @@ wallet.
 
 ## Contact
 
-Open an issue on the project's GitHub repository.
+General support: https://github.com/qcommit/quantum-seal-extension/issues
+
+Security reports: https://github.com/qcommit/quantum-seal-extension/security/advisories/new
+
+The source repositories retain the technical name Quantum Seal.

@@ -69,13 +69,13 @@ function App() {
   if (gate === 'loading')
     return (
       <div className="gate">
-        <Loading label="Opening Quantum Seal" />
+        <Loading label="Opening QuantumPocket" />
       </div>
     );
   if (gate === 'error')
     return (
       <LoadFailure
-        title="Could not open Quantum Seal"
+        title="Could not open QuantumPocket"
         error={gateError}
         onRetry={() => {
           setGate('loading');

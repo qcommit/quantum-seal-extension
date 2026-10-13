@@ -214,7 +214,7 @@ function Review() {
             <Lock size={22} />
           </span>
           <h1>Wallet locked</h1>
-          <p className="muted">Unlock Quantum Seal from the toolbar. This window updates once it is unlocked.</p>
+          <p className="muted">Unlock QuantumPocket from the toolbar. This window updates once it is unlocked.</p>
         </main>
         <CloseFooter />
       </Shell>
@@ -512,7 +512,7 @@ function Shell({ network, children }) {
       <header className="app-header review-header">
         <Mark />
         <span className="network-text">
-          <strong>Quantum Seal</strong>
+          <strong>QuantumPocket</strong>
           <small>Transfer approval</small>
         </span>
         {network ? <span className={`net-pill net-${network}`}>{BUILT_IN[network]?.label ?? network}</span> : null}

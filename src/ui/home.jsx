@@ -242,7 +242,7 @@ export function HomeTab({ reloadKey, onInitialized, onReceive, onSend, onSetting
           <Notice kind="warn">
             An older {o.label} wallet of yours still holds{' '}
             {o.otherWallets.map((w) => `${solDisplay(w.lamports)} SOL (${short(w.wallet, 5)})`).join(', ')}. It was
-            created by an earlier version of the Quantum Seal program (
+            created by an earlier version of the QuantumPocket program (
             <span title={o.otherWallets[0].program}>{short(o.otherWallets[0].program, 5)}</span>), which this version
             cannot move funds from.
           </Notice>

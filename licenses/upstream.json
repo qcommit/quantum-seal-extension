@@ -1,0 +1,44 @@
+{
+  "qrcode-generator@1.4.4": {
+    "file": "qrcode-generator-1.4.4.txt",
+    "license": "MIT",
+    "url": "https://raw.githubusercontent.com/kazuhikoarase/qrcode-generator/9bd2163ddc1628d1ec8ff22ea288a747275ef442/LICENSE",
+    "sha256": "3a850fa5f08101db6f40676c2786e10bd2cd5fff7b12ffdf1e0c434d4e49d90c",
+    "tag": "js1.4.4"
+  },
+  "@solana-program/loader-v3@0.7.0": {
+    "file": "solana-program-loader-v3-0.7.0.txt",
+    "license": "MIT",
+    "url": "https://raw.githubusercontent.com/solana-program/loader-v3/b74b8fbfba09dd1915134da3b4a90c69af058154/LICENSE",
+    "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+    "tag": "js@v0.7.0"
+  },
+  "@solana-program/compute-budget@0.19.0": {
+    "file": "solana-program-compute-budget-0.19.0.txt",
+    "license": "Apache-2.0",
+    "url": "https://raw.githubusercontent.com/solana-program/compute-budget/b68894cf2ca3664db1f9530061c63033a461ac33/LICENSE",
+    "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+    "tag": "js@v0.19.0"
+  },
+  "@solana-program/address-lookup-table@0.15.0": {
+    "file": "solana-program-address-lookup-table-0.15.0.txt",
+    "license": "Apache-2.0",
+    "url": "https://raw.githubusercontent.com/solana-program/address-lookup-table/d8e353376135d9699a243e798274dae7ea21da4f/LICENSE",
+    "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+    "tag": "js@v0.15.0"
+  },
+  "@solana-program/stake@0.9.0": {
+    "file": "solana-program-stake-0.9.0.txt",
+    "license": "MIT",
+    "url": "https://raw.githubusercontent.com/solana-program/stake/4459fcf0aad7051406d2ec55c51ddea85335f9bc/LICENSE",
+    "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+    "tag": "js@v0.9.0"
+  },
+  "@solana-program/system@0.15.0": {
+    "file": "solana-program-system-0.15.0.txt",
+    "license": "Apache-2.0",
+    "url": "https://raw.githubusercontent.com/solana-program/system/15f18487535a4f248afc1bf700a1a8a14f305452/LICENSE",
+    "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+    "tag": "js@v0.15.0"
+  }
+}

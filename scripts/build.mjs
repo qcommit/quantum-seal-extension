@@ -12,6 +12,7 @@ import { cpSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, rea
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { thirdPartyNotices } from './third-party-notices.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist');
@@ -109,6 +110,10 @@ const fromCoreModules = Object.keys(result.metafile.inputs).filter((p) =>
   inCore(resolve(root, p)) && resolve(root, p).includes(`${sep}node_modules${sep}`),
 );
 if (fromCoreModules.length) throw new Error(`Bundled from the core's node_modules: ${fromCoreModules.slice(0, 5).join(', ')}`);
+
+// Ship full license/NOTICE texts, not only esbuild's linked copyright snippets.
+cpSync(join(root, 'LICENSE'), join(dist, 'LICENSE'));
+writeFileSync(join(dist, 'THIRD_PARTY_NOTICES.txt'), thirdPartyNotices(root, Object.keys(result.metafile.inputs)));
 
 for (const f of ['ui/popup.html', 'ui/review.html'])
   cpSync(join(root, 'src', f), join(dist, f.split('/').pop()));

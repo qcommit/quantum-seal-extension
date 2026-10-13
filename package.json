@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "MIT",
-  "description": "Quantum Seal browser extension: a post-quantum Solana wallet (send, receive, hold).",
+  "description": "QuantumPocket browser extension: a post-quantum Solana wallet (send, receive, hold).",
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --import ./test/support/register.mjs --test test/*.test.mjs",
