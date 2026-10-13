@@ -5,6 +5,7 @@
 // Renders the mainnet fixture scenes at 2x with e2e/visual.mjs, then lays them out on
 // branded canvases and writes store/: four 1280x800 screenshots, the 440x280 small promo
 // tile and the 1400x560 marquee. Figures in the screens are fixtures, not real wallets.
+// Keep the DRAFT label until these images are reviewed for an activated mainnet release.
 import { execFileSync } from 'node:child_process';
 import { chromium } from 'playwright-core';
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -44,6 +45,7 @@ body::before {
   background-size: 22px 22px;
   mask-image: linear-gradient(90deg, transparent, #000 45%, #000);
 }
+.draft { position: absolute; z-index: 10; left: 20px; bottom: 12px; color: #c3bdde; font-size: 11px; letter-spacing: .07em; font-weight: 550; }
 .holo { background: linear-gradient(100deg, #8ff5ff, #a497ff 48%, #ff8ad8); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .brand { display: flex; align-items: center; gap: 14px; font-weight: 650; font-size: 21px; letter-spacing: .01em; }
 .brand img { width: 46px; height: 46px; }
@@ -63,7 +65,7 @@ p.sub { font-size: 21px; line-height: 1.5; color: #b4b2bf; }
 .chip { font-size: 15px; font-weight: 560; color: #d9d7e3; padding: 8px 14px; border-radius: 999px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); }
 `;
 
-const brand = `<div class="brand"><img src="${mark}" alt=""><span>Quantum Seal</span></div>`;
+const brand = `<div class="brand"><img src="${mark}" alt=""><span>QuantumPocket</span></div>`;
 const frame = (name, w, h, style) =>
   `<div class="frame" style="position:absolute;${style}"><img src="${shot(name)}" width="${w}" height="${h}" alt=""></div>`;
 const screenshot = ({ eyebrow, title, sub, chips = [], stage }) => `
@@ -85,8 +87,8 @@ const ASSETS = [
     size: [1280, 800],
     html: screenshot({
       eyebrow: 'Post-quantum approvals',
-      title: 'Every transfer, sealed with <span class="holo">SLH-DSA</span>.',
-      sub: 'Review the exact transfer in Quantum Seal’s own window. Your post-quantum key signs it, and the wallet program verifies it on-chain before anything moves.',
+      title: 'Your transfer, sealed with <span class="holo">SLH-DSA</span>.',
+      sub: 'Review an outgoing transfer in QuantumPocket’s own window. Your post-quantum key signs it; the wallet program checks that approval before the transfer executes.',
       chips: ['NIST FIPS 205', 'Verified on-chain', 'Solana mainnet'],
       stage: frame('review-mainnet', 420, 720, 'left:120px;top:40px'),
     }),
@@ -107,8 +109,8 @@ const ASSETS = [
     size: [1280, 800],
     html: screenshot({
       eyebrow: 'Recoverable by design',
-      title: 'One address, always recoverable.',
-      sub: 'Your wallet address is derived from your keys, so restoring an encrypted backup brings back the same address and funds.',
+      title: 'Your address, restored from backup.',
+      sub: 'Restore your encrypted backup with its passphrase to recover the same wallet address. Keep both somewhere safe.',
       stage:
         frame('review-done-mainnet', 420, 720, 'left:250px;top:40px;transform:scale(.9);transform-origin:top left;opacity:.9') +
         frame('receive-mainnet', 400, 600, 'left:40px;top:120px'),
@@ -132,7 +134,7 @@ const ASSETS = [
       <div style="position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px">
         <div style="display:grid;justify-items:center;gap:14px">
           <img src="${mark}" width="84" height="84" alt="" style="filter:drop-shadow(0 0 24px rgba(164,151,255,.45))">
-          <div style="font-size:34px;font-weight:720;letter-spacing:-.02em">Quantum Seal</div>
+          <div style="font-size:34px;font-weight:720;letter-spacing:-.02em">QuantumPocket</div>
           <div class="holo" style="font-size:16px;font-weight:650;letter-spacing:.14em;text-transform:uppercase">Post-quantum Solana wallet</div>
         </div>
       </div>`,
@@ -145,7 +147,7 @@ const ASSETS = [
         <div style="display:grid;gap:22px">
           ${brand}
           <h1 style="font-size:64px">Solana, sealed for<br>the <span class="holo">quantum era</span>.</h1>
-          <p class="sub">Every transfer approved with SLH-DSA (FIPS 205) and verified on-chain.</p>
+          <p class="sub">Outgoing transfers use SLH-DSA (FIPS 205) approval, verified by the wallet program.</p>
         </div>
         <div style="position:relative;height:100%">
           ${frame('home-mainnet', 400, 600, 'left:40px;top:70px')}
@@ -158,7 +160,7 @@ const browser = await chromium.launch({ channel: 'chromium', headless: true });
 try {
   for (const { file, size, html } of ASSETS) {
     const page = await browser.newPage({ viewport: { width: size[0], height: size[1] }, deviceScaleFactor: 1 });
-    await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${CSS}</style></head><body>${html}</body></html>`);
+    await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${CSS}</style></head><body>${html}<div class="draft">DRAFT · MAINNET UI FIXTURE</div></body></html>`);
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(150);
     await page.screenshot({ path: join(out, file) });

@@ -3,7 +3,17 @@
 Store uploads need a higher `version` in `src/manifest.json` (and `package.json`) each
 time; add an entry here for every upload.
 
-## Unreleased — recovery and cross-window hardening
+## 0.1.0-devnet.1 — public Chrome developer preview
+
+- QuantumPocket is the public product name. Existing Quantum Seal backup formats,
+  signature domains and protocol identifiers are unchanged.
+- Published MIT-licensed core and extension source, an installable devnet ZIP,
+  installation instructions and SHA-256 checksum. Chrome Web Store publication
+  and mainnet activation remain pending.
+- Release packages include complete notices for their bundled dependencies.
+- Verified with 78 unit tests, 26 actual local-validator browser steps and an
+  installation smoke test of the published ZIP. Interrupted-transfer recovery
+  checks all 11 successful uploads and every uploaded signature byte on-chain.
 
 - A requested backup download keeps the reminder until the user confirms the file
   was saved. Confirmation is tied to the exported encrypted keys, so a changed wallet
@@ -18,7 +28,7 @@ time; add an entry here for every upload.
 
 ## 0.1.0 (first store release, not yet submitted)
 
-The first version of Quantum Seal for Chrome: a post-quantum Solana wallet that holds,
+The first version of QuantumPocket for Chrome: a post-quantum Solana wallet that holds,
 sends and receives SOL and classic SPL tokens.
 
 - **Wallet.** A post-quantum owner key (SLH-DSA, FIPS 205) and a small Ed25519 fee key,
